@@ -18,10 +18,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_gtk_route_processor_selection_h__
-#define __ardour_gtk_route_processor_selection_h__
+#pragma once
 
 #include <vector>
+
+#include "pbd/property_basics.h"
 #include "pbd/signals.h"
 
 #include "processor_selection.h"
@@ -63,4 +64,3 @@ private:
 
 bool operator==(const RouteProcessorSelection& a, const RouteProcessorSelection& b);
 
-#endif /* __ardour_gtk_route_processor_selection_h__ */

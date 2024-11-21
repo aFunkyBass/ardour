@@ -3,8 +3,7 @@
 	Adapted for Ardour by Ben Loftis, March 2012
 
 *****************************************************************************/
-#ifndef __soundcloud_export_selector_h__
-#define __soundcloud_export_selector_h__
+#pragma once
 
 #include <string>
 #include <stdio.h>
@@ -19,6 +18,8 @@
 #include <gtkmm/label.h>
 #include <gtkmm/progressbar.h>
 #include <gtkmm/table.h>
+
+#include "ardour/session_handle.h"
 
 class SoundcloudExportSelector : public Gtk::VBox, public ARDOUR::SessionHandlePtr
 {
@@ -46,4 +47,3 @@ private:
 
 };
 
-#endif // __soundcloud_export_selector_h__

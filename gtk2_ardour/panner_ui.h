@@ -20,8 +20,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_gtk_panner_ui_h__
-#define __ardour_gtk_panner_ui_h__
+#pragma once
 
 #include <vector>
 
@@ -50,6 +49,7 @@ namespace ARDOUR {
 }
 
 namespace Gtk {
+	class CheckMenuItem;
 	class Menu;
 	class Menuitem;
 }
@@ -153,5 +153,4 @@ private:
 	bool _suspend_menu_callbacks;
 };
 
-#endif /* __ardour_gtk_panner_ui_h__ */
 

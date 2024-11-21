@@ -19,8 +19,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __gtk_ardour_region_edit_h__
-#define __gtk_ardour_region_edit_h__
+#pragma once
 
 #include <map>
 
@@ -42,12 +41,12 @@
 #include "gtkmm2ext/dndtreeview.h"
 #include "gtkmm2ext/dndvbox.h"
 
+#include "widgets/frame.h"
+
 #include "pbd/signals.h"
 
 #include "audio_clock.h"
-#include "ardour_dialog.h"
 #include "plugin_interest.h"
-#include "region_editor.h"
 
 namespace ARDOUR {
 	class Region;
@@ -58,11 +57,13 @@ namespace ARDOUR {
 class RegionView;
 class ClockGroup;
 
-class RegionEditor : public ArdourDialog
+class RegionEditor : public ArdourWidgets::Frame, public ARDOUR::SessionHandlePtr
 {
 public:
 	RegionEditor (ARDOUR::Session*, RegionView*);
 	virtual ~RegionEditor ();
+
+	std::shared_ptr<ARDOUR::Region> region () const { return _region; }
 
 protected:
 	virtual void region_changed (const PBD::PropertyChange&);
@@ -123,6 +124,7 @@ private:
 		void plugin_drop (Gtk::SelectionData const&, RegionFxEntry*, Glib::RefPtr<Gdk::DragContext> const&);
 		void object_drop (Gtkmm2ext::DnDVBox<RegionFxEntry>*, RegionFxEntry*, Glib::RefPtr<Gdk::DragContext> const&);
 		void delete_dragged_plugins (std::list<std::shared_ptr<ARDOUR::RegionFxPlugin>> const&);
+		bool drag_refuse (Gtkmm2ext::DnDVBox<RegionFxEntry>*, RegionFxEntry*);
 
 		std::shared_ptr<ARDOUR::RegionFxPlugin> find_drop_position (RegionFxEntry*);
 
@@ -187,7 +189,6 @@ private:
 	gint breleased (GdkEventButton* ev, Gtk::SpinButton* but, void (RegionEditor::*pmf)());
 
 	bool on_delete_event (GdkEventAny *);
-	void handle_response (int);
 
 	bool spin_arrow_grab;
 
@@ -196,5 +197,3 @@ private:
 
 	void set_clock_mode_from_primary ();
 };
-
-#endif /* __gtk_ardour_region_edit_h__ */

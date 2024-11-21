@@ -69,7 +69,7 @@ Butler::Butler (Session& s)
 	SessionEvent::pool->set_trash (&pool_trash);
 
 	/* catch future changes to parameters */
-	Config->ParameterChanged.connect_same_thread (*this, boost::bind (&Butler::config_changed, this, _1));
+	Config->ParameterChanged.connect_same_thread (*this, std::bind (&Butler::config_changed, this, _1));
 }
 
 Butler::~Butler ()
@@ -81,7 +81,7 @@ void
 Butler::map_parameters ()
 {
 	/* use any current ones that we care about */
-	boost::function<void (std::string)> ff (boost::bind (&Butler::config_changed, this, _1));
+	std::function<void (std::string)> ff (std::bind (&Butler::config_changed, this, _1));
 	Config->map_parameters (ff);
 }
 
@@ -141,7 +141,7 @@ Butler::start_thread ()
 
 	should_run = false;
 
-	if (pthread_create_and_store ("disk butler", &thread, _thread_work, this)) {
+	if (pthread_create_and_store ("butler", &thread, _thread_work, this)) {
 		error << _("Session: could not create butler thread") << endmsg;
 		return -1;
 	}
@@ -171,7 +171,6 @@ void*
 Butler::_thread_work (void* arg)
 {
 	SessionEvent::create_per_thread_pool ("butler events", 4096);
-	pthread_set_name (X_("butler"));
 	/* get thread buffers for RegionFx */
 	ARDOUR::ProcessThread* pt = new ProcessThread ();
 	pt->get_buffers ();
@@ -273,7 +272,7 @@ Butler::thread_work ()
 		RouteList rl_with_auditioner = *rl;
 		rl_with_auditioner.push_back (_session.the_auditioner ());
 
-		DEBUG_TRACE (DEBUG::Butler, string_compose ("butler starts refill loop, twr = %1\n", transport_work_requested ()));
+		DEBUG_TRACE (DEBUG::Butler, string_compose ("butler starts refill loop, twr = %1\n", should_do_transport_work.load ()));
 
 		std::shared_ptr<IOTaskList> tl = _session.io_tasklist ();
 
@@ -413,8 +412,8 @@ Butler::flush_tracks_to_disk_normal (std::shared_ptr<RouteList const> rl, uint32
 void
 Butler::schedule_transport_work ()
 {
-	DEBUG_TRACE (DEBUG::Butler, "requesting more transport work\n");
 	should_do_transport_work.fetch_add (1);
+	DEBUG_TRACE (DEBUG::Butler, string_compose ("requesting more transport work (now %1)\n", should_do_transport_work.load ()));
 	summon ();
 }
 

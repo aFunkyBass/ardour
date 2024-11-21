@@ -111,6 +111,8 @@ string2miditracknamesource (string const & str)
 		return SMFTrackNumber;
 	} else if (str == _("by track name")) {
 		return SMFTrackName;
+	} else if (str == _("by file and track name")) {
+		return SMFFileAndTrackName;
 	} else if (str == _("by instrument name")) {
 		return SMFInstrumentName;
 	}
@@ -277,18 +279,17 @@ SoundFileBox::set_session(Session* s)
 {
 	SessionHandlePtr::set_session (s);
 
-	length_clock.set_session (s);
-	timecode_clock.set_session (s);
-
 	if (!_session) {
 		play_btn.set_sensitive (false);
 		stop_btn.set_sensitive (false);
 		auditioner_connections.drop_connections();
 	} else {
+		length_clock.set_session (s);
+		timecode_clock.set_session (s);
 		auditioner_connections.drop_connections();
 		if (_session->the_auditioner()) {
-			_session->AuditionActive.connect(auditioner_connections, invalidator (*this), boost::bind (&SoundFileBox::audition_active, this, _1), gui_context());
-			_session->the_auditioner()->AuditionProgress.connect(auditioner_connections, invalidator (*this), boost::bind (&SoundFileBox::audition_progress, this, _1, _2), gui_context());
+			_session->AuditionActive.connect(auditioner_connections, invalidator (*this), std::bind (&SoundFileBox::audition_active, this, _1), gui_context());
+			_session->the_auditioner()->AuditionProgress.connect(auditioner_connections, invalidator (*this), std::bind (&SoundFileBox::audition_progress, this, _1, _2), gui_context());
 		}
 	}
 }
@@ -987,9 +988,9 @@ void
 SoundFileBrowser::set_session (Session* s)
 {
 	ArdourWindow::set_session (s);
-	preview.set_session (s);
 
 	if (_session) {
+		preview.set_session (s);
 		add_gain_meter ();
 	} else {
 		remove_gain_meter ();
@@ -1399,18 +1400,18 @@ SoundFileBrowser::handle_freesound_results(std::string theString) {
 
 			double duration_seconds = atof (duration);
 			double h, m, s;
-			char duration_hhmmss[16];
+			char duration_hhmmss[32];
 			if (duration_seconds > 99 * 60 * 60) {
 				strcpy(duration_hhmmss, ">99h");
 			} else {
 				s = modf(duration_seconds/60, &m) * 60;
 				m = modf(m/60, &h) * 60;
 				if (h > 0) {
-					sprintf(duration_hhmmss, "%2.fh:%02.fm:%04.1fs", h, m, s);
+					snprintf(duration_hhmmss, sizeof (duration), "%2.fh:%02.fm:%04.1fs", h, m, s);
 				} else if (m > 0) {
-					sprintf(duration_hhmmss, "%2.fm:%04.1fs", m, s);
+					snprintf(duration_hhmmss, sizeof (duration), "%2.fm:%04.1fs", m, s);
 				} else {
-					sprintf(duration_hhmmss, "%4.1fs", s);
+					snprintf(duration_hhmmss, sizeof (duration), "%4.1fs", s);
 				}
 			}
 
@@ -1981,6 +1982,7 @@ SoundFileOmega::SoundFileOmega (string title, ARDOUR::Session* s,
 	str.clear ();
 	str.push_back (_("by track number"));
 	str.push_back (_("by track name"));
+	str.push_back (_("by file and track name"));
 	str.push_back (_("by instrument name"));
 	set_popdown_strings (midi_track_name_combo, str);
 	midi_track_name_combo.set_active_text (str.front());

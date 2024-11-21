@@ -110,9 +110,9 @@ using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
 
-PBD::Signal3<int,std::shared_ptr<Route>, std::shared_ptr<PluginInsert>, Route::PluginSetupOptions > Route::PluginSetup;
+PBD::Signal<int(std::shared_ptr<Route>, std::shared_ptr<PluginInsert>, Route::PluginSetupOptions )> Route::PluginSetup;
 
-PBD::Signal1<void, std::weak_ptr<Route> > Route::FanOut;
+PBD::Signal<void(std::weak_ptr<Route> )> Route::FanOut;
 
 /** Base class for all routable/mixable objects (tracks and busses) */
 Route::Route (Session& sess, string name, PresentationInfo::Flag flag, DataType default_type)
@@ -178,7 +178,7 @@ Route::init ()
 
 	_solo_control.reset (new SoloControl (_session, X_("solo"), *this, *this, tdp));
 	add_control (_solo_control);
-	_solo_control->Changed.connect_same_thread (*this, boost::bind (&Route::solo_control_changed, this, _1, _2));
+	_solo_control->Changed.connect_same_thread (*this, std::bind (&Route::solo_control_changed, this, _1, _2));
 
 	_mute_control.reset (new MuteControl (_session, X_("mute"), *this, tdp));
 	add_control (_mute_control);
@@ -203,11 +203,11 @@ Route::init ()
 	_input.reset (new IO (_session, _name, IO::Input, _default_type));
 	_output.reset (new IO (_session, _name, IO::Output, _default_type));
 
-	_input->changed.connect_same_thread (*this, boost::bind (&Route::input_change_handler, this, _1, _2));
-	_input->PortCountChanging.connect_same_thread (*this, boost::bind (&Route::input_port_count_changing, this, _1));
+	_input->changed.connect_same_thread (*this, std::bind (&Route::input_change_handler, this, _1, _2));
+	_input->PortCountChanging.connect_same_thread (*this, std::bind (&Route::input_port_count_changing, this, _1));
 
-	_output->changed.connect_same_thread (*this, boost::bind (&Route::output_change_handler, this, _1, _2));
-	_output->PortCountChanging.connect_same_thread (*this, boost::bind (&Route::output_port_count_changing, this, _1));
+	_output->changed.connect_same_thread (*this, std::bind (&Route::output_change_handler, this, _1, _2));
+	_output->PortCountChanging.connect_same_thread (*this, std::bind (&Route::output_port_count_changing, this, _1));
 
 	/* add the amp/fader processor.
 	 * it should be the first processor to be added on every route.
@@ -410,7 +410,7 @@ Route::process_output_buffers (BufferSet& bufs,
 		_pannable->automation_run (start_sample, nframes);
 	}
 
-	const int speed = (is_auditioner() ? 1 : _session.transport_speed ());
+	const int speed = (is_auditioner() ? 1 : _session.transport_speed (true));
 	assert (speed == -1 || speed == 0 || speed == 1);
 
 	const samplecnt_t output_latency = speed * _output_latency;
@@ -1128,7 +1128,7 @@ Route::add_processors (const ProcessorList& others, std::shared_ptr<Processor> b
 		flags &= mask;
 
 		if (flags != None) {
-			boost::optional<int> rv = PluginSetup (std::dynamic_pointer_cast<Route>(shared_from_this ()), pi, flags);  /* EMIT SIGNAL */
+			std::optional<int> rv = PluginSetup (std::dynamic_pointer_cast<Route>(shared_from_this ()), pi, flags);  /* EMIT SIGNAL */
 			int mode = rv.value_or (0);
 			switch (mode & 3) {
 				case 1:
@@ -1204,7 +1204,7 @@ Route::add_processors (const ProcessorList& others, std::shared_ptr<Processor> b
 
 			if (pi && pi->has_sidechain ()) {
 				pi->update_sidechain_name ();
-				pi->sidechain_input ()->changed.connect_same_thread (*pi, boost::bind (&Route::sidechain_change_handler, this, _1, _2));
+				pi->sidechain_input ()->changed.connect_same_thread (*pi, std::bind (&Route::sidechain_change_handler, this, _1, _2));
 			}
 
 			if ((*i)->active()) {
@@ -1212,14 +1212,14 @@ Route::add_processors (const ProcessorList& others, std::shared_ptr<Processor> b
 				(*i)->activate ();
 			}
 
-			(*i)->ActiveChanged.connect_same_thread (*this, boost::bind (&Session::queue_latency_recompute, &_session));
+			(*i)->ActiveChanged.connect_same_thread (*this, std::bind (&Session::queue_latency_recompute, &_session));
 
 			std::shared_ptr<Send> send;
 			if ((send = std::dynamic_pointer_cast<Send> (*i))) {
 				send->SelfDestruct.connect_same_thread (**i,
-						boost::bind (&Route::processor_selfdestruct, this, std::weak_ptr<Processor> (*i)));
+						std::bind (&Route::processor_selfdestruct, this, std::weak_ptr<Processor> (*i)));
 				if (send->output()) {
-					send->output()->changed.connect_same_thread (**i, boost::bind (&Route::output_change_handler, this, _1, _2));
+					send->output()->changed.connect_same_thread (**i, std::bind (&Route::output_change_handler, this, _1, _2));
 				}
 			}
 
@@ -1676,7 +1676,7 @@ Route::replace_processor (std::shared_ptr<Processor> old, std::shared_ptr<Proces
 			sub->enable (true);
 		}
 
-		sub->ActiveChanged.connect_same_thread (*sub, boost::bind (&Session::queue_latency_recompute, &_session));
+		sub->ActiveChanged.connect_same_thread (*sub, std::bind (&Session::queue_latency_recompute, &_session));
 	}
 
 	reset_instrument_info ();
@@ -2423,7 +2423,7 @@ Route::add_remove_sidechain (std::shared_ptr<Processor> proc, bool add)
 
 	if (pi->has_sidechain ()) {
 		pi->reset_sidechain_map ();
-		pi->sidechain_input ()->changed.connect_same_thread (*pi, boost::bind (&Route::sidechain_change_handler, this, _1, _2));
+		pi->sidechain_input ()->changed.connect_same_thread (*pi, std::bind (&Route::sidechain_change_handler, this, _1, _2));
 	}
 
 	processors_changed (RouteProcessorChange ()); /* EMIT SIGNAL */
@@ -3280,7 +3280,7 @@ Route::set_processor_state (const XMLNode& node, int version)
 		for (ProcessorList::const_iterator i = _processors.begin(); i != _processors.end(); ++i) {
 
 			(*i)->set_owner (this);
-			(*i)->ActiveChanged.connect_same_thread (**i, boost::bind (&Session::queue_latency_recompute, &_session));
+			(*i)->ActiveChanged.connect_same_thread (**i, std::bind (&Session::queue_latency_recompute, &_session));
 
 			std::shared_ptr<PluginInsert> pi;
 
@@ -3355,9 +3355,9 @@ Route::set_processor_state (XMLNode const& node, int version, XMLProperty const*
 
 			processor.reset (new Send (_session, _pannable, _mute_master, Delivery::Send, true));
 			std::shared_ptr<Send> send = std::dynamic_pointer_cast<Send> (processor);
-			send->SelfDestruct.connect_same_thread (*send, boost::bind (&Route::processor_selfdestruct, this, std::weak_ptr<Processor> (processor)));
+			send->SelfDestruct.connect_same_thread (*send, std::bind (&Route::processor_selfdestruct, this, std::weak_ptr<Processor> (processor)));
 			if (send->output()) {
-				send->output()->changed.connect_same_thread (*send, boost::bind (&Route::output_change_handler, this, _1, _2));
+				send->output()->changed.connect_same_thread (*send, std::bind (&Route::output_change_handler, this, _1, _2));
 			}
 
 		} else if (prop->value() == "sursend") {
@@ -3388,7 +3388,7 @@ Route::set_processor_state (XMLNode const& node, int version, XMLProperty const*
 
 		/* subscribe to Sidechain IO changes */
 		if (pi && pi->has_sidechain ()) {
-			pi->sidechain_input ()->changed.connect_same_thread (*pi, boost::bind (&Route::sidechain_change_handler, this, _1, _2));
+			pi->sidechain_input ()->changed.connect_same_thread (*pi, std::bind (&Route::sidechain_change_handler, this, _1, _2));
 		}
 
 		/* we have to note the monitor send here, otherwise a new one will be created
@@ -4050,7 +4050,7 @@ Route::latency_preroll (pframes_t nframes, samplepos_t& start_sample, samplepos_
 		return nframes;
 	}
 	if (!_disk_reader) {
-		if (_session.transport_speed() < 0) {
+		if (_session.transport_speed (true) < 0) {
 			start_sample += latency_preroll;
 			end_sample   += latency_preroll;
 		} else {
@@ -4065,7 +4065,7 @@ Route::latency_preroll (pframes_t nframes, samplepos_t& start_sample, samplepos_
 		return 0;
 	}
 
-	if (_session.transport_speed() < 0) {
+	if (_session.transport_speed (true) < 0) {
 		start_sample += latency_preroll;
 		end_sample   += latency_preroll;
 	} else {
@@ -4846,7 +4846,7 @@ Route::set_active (bool yn, void* src)
 	}
 
 	if (_route_group && src != _route_group && _route_group->is_active() && _route_group->is_route_active()) {
-		_route_group->foreach_route (boost::bind (&Route::set_active, _1, yn, _route_group));
+		_route_group->foreach_route (std::bind (&Route::set_active, _1, yn, _route_group));
 		return;
 	}
 
@@ -5438,7 +5438,6 @@ Route::setup_invisible_processors ()
 				}
 				if (_disk_reader) {
 					new_processors.push_front (_disk_reader);
-					new_processors.begin();
 				}
 			}
 			break;
@@ -5927,8 +5926,15 @@ Route::send_pan_azimuth_controllable (uint32_t n) const
 }
 
 std::shared_ptr<AutomationControl>
-Route::send_level_controllable (uint32_t n) const
+Route::send_level_controllable (uint32_t n, bool locked) const
 {
+	if (locked) {
+		/* calling thread has a WriterLock (_processor_lock)
+		 * we cannot call nth_send()
+		 */
+		return std::shared_ptr<AutomationControl>();
+	}
+
 	std::shared_ptr<Send> s = std::dynamic_pointer_cast<Send>(nth_send (n));
 	if (s) {
 		return s->gain_control ();
@@ -6182,6 +6188,7 @@ Route::monitoring_state () const
 
 	bool const roll        = _session.transport_state_rolling ();
 	bool const auto_input  = _session.config.get_auto_input ();
+	bool const clip_rec    = _triggerbox && _triggerbox->record_enabled();
 	bool const track_rec   = _disk_writer->record_enabled ();
 	bool session_rec;
 
@@ -6211,14 +6218,14 @@ Route::monitoring_state () const
 		session_rec = _session.get_record_enabled();
 	}
 
-	if (track_rec) {
+	if (track_rec || clip_rec) {
 
-		if (!session_rec && roll && auto_input) {
+		if (!clip_rec && (!session_rec && roll && auto_input)) {
 			return auto_monitor_disk | get_input_monitoring_state (false, false);
 		} else {
 			/* recording */
 			const samplecnt_t prtl = _session.preroll_record_trim_len ();
-			if (session_rec && roll && prtl > 0 && _disk_writer->get_captured_samples () < prtl) {
+			if (!clip_rec && session_rec && roll && prtl > 0 && _disk_writer->get_captured_samples () < prtl) {
 				/* CUE monitor during pre-roll */
 				return auto_monitor_disk | (get_input_monitoring_state (true, false) & auto_monitor_mask);
 			}

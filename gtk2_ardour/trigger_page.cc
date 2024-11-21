@@ -39,14 +39,16 @@
 #include "ardour/region_factory.h"
 #include "ardour/profile.h"
 #include "ardour/smf_source.h"
+#include "ardour/stripable.h"
 
 #include "actions.h"
+#include "application_bar.h"
 #include "ardour_ui.h"
 #include "editor.h"
 #include "gui_thread.h"
 #include "public_editor.h"
+#include "midi_cue_editor.h"
 #include "timers.h"
-
 #include "trigger_page.h"
 #include "trigger_strip.h"
 #include "triggerbox_ui.h"
@@ -64,11 +66,12 @@ using namespace Gtk;
 using namespace std;
 
 TriggerPage::TriggerPage ()
-	: Tabbable (_content, _("Cues"), X_("trigger"))
+	: Tabbable (_("Cues"), X_("trigger"), NULL, true, Tabbable::PaneLayout (Tabbable::PaneRight | Tabbable::PaneBottom))
 	, _cue_area_frame (0.5, 0, 1.0, 0)
 	, _cue_box (16, 16 * TriggerBox::default_triggers_per_box)
 	, _master_widget (16, 16)
 	, _master (_master_widget.root ())
+	, _show_bottom_pane (false)
 	, _selection (*this, *this)
 {
 	load_bindings ();
@@ -124,15 +127,12 @@ TriggerPage::TriggerPage ()
 	_sidebar_notebook.popup_disable ();
 	_sidebar_notebook.set_tab_pos (Gtk::POS_RIGHT);
 
-	_sidebar_vbox.pack_start (_sidebar_notebook);
 	add_sidebar_page (_("Clips"), _trigger_clip_picker);
 	add_sidebar_page (_("Tracks"), _trigger_route_list.widget ());
 	add_sidebar_page (_("Sources"), _trigger_source_list.widget ());
 	add_sidebar_page (_("Regions"), _trigger_region_list.widget ());
 
-	/* Upper pane ([slot | strips] | file browser) */
-	_pane_upper.add (_strip_group_box);
-	_pane_upper.add (_sidebar_vbox);
+	_midi_editor = new MidiCueEditor;
 
 	/* Bottom -- Properties of selected Slot/Region */
 	Gtk::Table* table = manage (new Gtk::Table);
@@ -142,26 +142,24 @@ TriggerPage::TriggerPage ()
 
 	int col = 0;
 	table->attach (_slot_prop_box, col, col + 1, 0, 1, Gtk::FILL, Gtk::SHRINK | Gtk::FILL);
-
-	col = 1;
+	++col;
 	table->attach (_audio_trig_box, col, col + 1, 0, 1, Gtk::FILL, Gtk::SHRINK | Gtk::FILL);
 	++col;
-
-#ifdef MIDI_PROPERTIES_BOX_IMPLEMENTED
-	col = 2;
-	table->attach (_midi_trig_box, col, col + 1, 0, 1, Gtk::FILL, Gtk::SHRINK);
+	table->attach (_midi_editor->toolbox(), col, col + 1, 0, 1, Gtk::EXPAND|Gtk::FILL, Gtk::EXPAND|Gtk::FILL);
 	++col;
-#endif
+
+	table->show_all ();
 
 	_parameter_box.pack_start (*table);
+	_parameter_box.show ();
 
 	/* Top-level Layout */
-	_content.pack_start (_pane_upper, true, true);
-	_content.pack_start (_parameter_box, false, false);
-	_content.show ();
+	content_app_bar.add (_application_bar);
+	content_main.add (_strip_group_box);
+	content_att_bottom.add (_parameter_box);
+	content_att_right.add (_sidebar_notebook);
 
 	/* Show all */
-	_pane_upper.show ();
 	_strip_group_box.show ();
 	_strip_scroller.show ();
 	_strip_packer.show ();
@@ -171,22 +169,14 @@ TriggerPage::TriggerPage ()
 	_sidebar_notebook.show_all ();
 
 	/* setup keybidings */
-	_content.set_data ("ardour-bindings", bindings);
+	contents().set_data ("ardour-bindings", bindings);
 
 	/* subscribe to signals */
-	Config->ParameterChanged.connect (*this, invalidator (*this), boost::bind (&TriggerPage::parameter_changed, this, _1), gui_context ());
-	PresentationInfo::Change.connect (*this, invalidator (*this), boost::bind (&TriggerPage::pi_property_changed, this, _1), gui_context ());
+	Config->ParameterChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::parameter_changed, this, _1), gui_context ());
+	PresentationInfo::Change.connect (*this, invalidator (*this), std::bind (&TriggerPage::pi_property_changed, this, _1), gui_context ());
 
 	/* init */
 	update_title ();
-
-	/* Restore pane state */
-	float          fract;
-	XMLNode const* settings = ARDOUR_UI::instance ()->trigger_page_settings ();
-	if (!settings || !settings->get_property ("triggerpage-hpane-pos", fract) || fract > 1.0) {
-		fract = 0.75f;
-	}
-	_pane_upper.set_divider (0, fract);
 }
 
 TriggerPage::~TriggerPage ()
@@ -217,16 +207,45 @@ TriggerPage::use_own_window (bool and_fill_it)
 	return win;
 }
 
+void
+TriggerPage::showhide_att_bottom (bool yn)
+{
+	if (_show_bottom_pane == yn) {
+		return;
+	}
+
+	_show_bottom_pane = yn;
+
+	if (!_show_bottom_pane) {
+		Tabbable::showhide_att_bottom (false);
+	} else if (!Editor::instance ().get_selection ().triggers.empty ()) {
+		Tabbable::showhide_att_bottom (true);
+	}
+}
+
 XMLNode&
 TriggerPage::get_state () const
 {
 	XMLNode* node = new XMLNode (X_("TriggerPage"));
 	node->add_child_nocopy (Tabbable::get_state ());
 
-	node->set_property (X_("triggerpage-hpane-pos"), _pane_upper.get_divider ());
 	node->set_property (X_("triggerpage-sidebar-page"), _sidebar_notebook.get_current_page ());
 
+	node->add_child_nocopy (_midi_editor->get_state());
+
+	Glib::RefPtr<ToggleAction> act = ActionManager::get_toggle_action ("Cues", "ToggleTriggerList");
+	node->set_property ("show-trigger-list", act->get_active ());
+
+	act = ActionManager::get_toggle_action ("Cues", "ToggleTriggerProps");
+	node->set_property ("show-trigger-properties", act->get_active ());
+
 	return *node;
+}
+
+void
+TriggerPage::focus_on_clock()
+{
+	_application_bar.focus_on_clock();
 }
 
 int
@@ -236,6 +255,30 @@ TriggerPage::set_state (const XMLNode& node, int version)
 	if (node.get_property (X_("triggerpage-sidebar-page"), sidebar_page)) {
 		_sidebar_notebook.set_current_page (sidebar_page);
 	}
+
+	XMLNode* mn = node.child (X_("MIDICueEditor"));
+	if (mn) {
+		_midi_editor->set_state (*mn, version);
+	}
+
+	bool yn = true;
+	node.get_property ("show-trigger-list", yn);
+	{
+		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleTriggerList"));
+		/* do it twice to force the change */
+		tact->set_active (!yn);
+		tact->set_active (yn);
+	}
+
+	yn = true; // show properties by default
+	node.get_property ("show-trigger-props", yn);
+	{
+		Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action (X_("Cues"), X_("ToggleTriggerProps"));
+		/* do it twice to force the change */
+		tact->set_active (!yn);
+		tact->set_active (yn);
+	}
+
 	return Tabbable::set_state (node, version);
 }
 
@@ -250,6 +293,12 @@ TriggerPage::set_session (Session* s)
 {
 	SessionHandlePtr::set_session (s);
 
+	if (!_session) {
+		_selection.clear ();
+		return;
+	}
+
+	_application_bar.set_session (_session);
 	_cue_box.set_session (s);
 	_trigger_clip_picker.set_session (s);
 	_master.set_session (s);
@@ -257,23 +306,19 @@ TriggerPage::set_session (Session* s)
 	_trigger_region_list.set_session (s);
 	_trigger_route_list.set_session (s);
 
-	if (!_session) {
-		_selection.clear ();
-		return;
-	}
-
 	XMLNode* node = ARDOUR_UI::instance ()->trigger_page_settings ();
 	set_state (*node, Stateful::loading_state_version);
 
-	_session->DirtyChanged.connect (_session_connections, invalidator (*this), boost::bind (&TriggerPage::update_title, this), gui_context ());
-	_session->StateSaved.connect (_session_connections, invalidator (*this), boost::bind (&TriggerPage::update_title, this), gui_context ());
+	_session->DirtyChanged.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::update_title, this), gui_context ());
+	_session->StateSaved.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::update_title, this), gui_context ());
 
-	_session->RouteAdded.connect (_session_connections, invalidator (*this), boost::bind (&TriggerPage::add_routes, this, _1), gui_context ());
-	TriggerStrip::CatchDeletion.connect (*this, invalidator (*this), boost::bind (&TriggerPage::remove_route, this, _1), gui_context ());
+	_session->RouteAdded.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::add_routes, this, _1), gui_context ());
+	TriggerStrip::CatchDeletion.connect (*this, invalidator (*this), std::bind (&TriggerPage::remove_route, this, _1), gui_context ());
 
-	_session->config.ParameterChanged.connect (_session_connections, invalidator (*this), boost::bind (&TriggerPage::parameter_changed, this, _1), gui_context ());
+	_session->config.ParameterChanged.connect (_session_connections, invalidator (*this), std::bind (&TriggerPage::parameter_changed, this, _1), gui_context ());
 
 	Editor::instance ().get_selection ().TriggersChanged.connect (sigc::mem_fun (*this, &TriggerPage::selection_changed));
+	Trigger::TriggerArmChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::rec_enable_changed, this, _1), gui_context());
 
 	initial_track_display ();
 
@@ -281,7 +326,7 @@ TriggerPage::set_session (Session* s)
 
 	_audio_trig_box.set_session (s);
 
-	_midi_trig_box.set_session (s);
+	_midi_editor->set_session (s);
 
 	update_title ();
 	start_updating ();
@@ -377,36 +422,90 @@ TriggerPage::clear_selected_slot ()
 }
 
 void
+TriggerPage::rec_enable_changed (Trigger const * trigger)
+{
+	assert (trigger);
+
+	if (!trigger->armed()) {
+		_midi_editor->trigger_rec_enable_change (*trigger);
+		return;
+	}
+
+	/* hide everything */
+
+	_slot_prop_box.hide ();
+	_audio_trig_box.hide ();
+	_midi_trig_box.hide ();
+	_midi_editor->viewport().hide ();
+
+	Tabbable::showhide_att_bottom (false);
+
+	TriggerBox& box = trigger->box();
+	TriggerReference ref (trigger->boxptr(), trigger->index());
+
+	_slot_prop_box.set_slot (ref);
+	_slot_prop_box.show ();
+
+	if (box.data_type () == DataType::AUDIO) {
+		if (trigger->the_region()) {
+			_audio_trig_box.set_trigger (ref);
+			_audio_trig_box.show ();
+		}
+
+	} else {
+
+		_midi_trig_box.set_trigger (ref);
+		_midi_trig_box.show ();
+
+		_midi_editor->set (ref);
+		_midi_editor->viewport().show ();
+	}
+
+	if (_show_bottom_pane) {
+		Tabbable::showhide_att_bottom (true);
+	}
+}
+
+void
 TriggerPage::selection_changed ()
 {
 	Selection& selection (Editor::instance ().get_selection ());
 
+	/* hide everything */
+
 	_slot_prop_box.hide ();
-
 	_audio_trig_box.hide ();
-
 	_midi_trig_box.hide ();
+	_midi_editor->viewport().hide ();
 
-	_parameter_box.hide ();
+	Tabbable::showhide_att_bottom (false);
 
 	if (!selection.triggers.empty ()) {
 		TriggerSelection ts      = selection.triggers;
 		TriggerEntry*    entry   = *ts.begin ();
 		TriggerReference ref     = entry->trigger_reference ();
 		TriggerPtr       trigger = entry->trigger ();
+		std::shared_ptr<TriggerBox> box = ref.box();
 
 		_slot_prop_box.set_slot (ref);
 		_slot_prop_box.show ();
-		if (trigger->region ()) {
-			if (trigger->region ()->data_type () == DataType::AUDIO) {
+
+		if (box->data_type () == DataType::AUDIO) {
+			if (trigger->the_region()) {
 				_audio_trig_box.set_trigger (ref);
 				_audio_trig_box.show ();
-			} else {
-				_midi_trig_box.set_trigger (ref);
-				_midi_trig_box.show ();
 			}
+		} else {
+			_midi_trig_box.set_trigger (ref);
+			_midi_trig_box.show ();
+
+			_midi_editor->set (ref);
+			_midi_editor->viewport().show ();
 		}
-		_parameter_box.show ();
+
+		if (_show_bottom_pane) {
+			Tabbable::showhide_att_bottom (true);
+		}
 	}
 }
 
@@ -436,8 +535,8 @@ TriggerPage::add_routes (RouteList& rl)
 		TriggerStrip* ts = new TriggerStrip (_session, *r);
 		_strips.push_back (ts);
 
-		(*r)->presentation_info ().PropertyChanged.connect (*this, invalidator (*this), boost::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
-		(*r)->PropertyChanged.connect (*this, invalidator (*this), boost::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
+		(*r)->presentation_info ().PropertyChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
+		(*r)->PropertyChanged.connect (*this, invalidator (*this), std::bind (&TriggerPage::stripable_property_changed, this, _1, std::weak_ptr<Stripable> (*r)), gui_context ());
 		ts->signal_button_release_event().connect (sigc::bind (sigc::mem_fun(*this, &TriggerPage::strip_button_release_event), ts));
 	}
 	redisplay_track_list ();
@@ -730,8 +829,8 @@ TriggerPage::drop_paths_part_two (std::vector<std::string> paths)
 	}
 	timepos_t pos (0);
 	Editing::ImportDisposition disposition = Editing::ImportSerializeFiles; // or Editing::ImportDistinctFiles // TODO use drop modifier? config?
-	PublicEditor::instance().do_import (midi_paths, disposition, Editing::ImportAsTrigger, SrcBest, SMFTrackNumber, SMFTempoIgnore, pos, _trigger_clip_picker.instrument_plugin ());
-	PublicEditor::instance().do_import (audio_paths, disposition, Editing::ImportAsTrigger, SrcBest, SMFTrackNumber, SMFTempoIgnore, pos);
+	PublicEditor::instance().do_import (midi_paths, disposition, Editing::ImportAsTrigger, SrcBest, SMFFileAndTrackName, SMFTempoIgnore, pos, _trigger_clip_picker.instrument_plugin ());
+	PublicEditor::instance().do_import (audio_paths, disposition, Editing::ImportAsTrigger, SrcBest, SMFFileAndTrackName, SMFTempoIgnore, pos);
 }
 
 bool
@@ -758,7 +857,7 @@ TriggerPage::stop_updating ()
 void
 TriggerPage::fast_update_strips ()
 {
-	if (_content.get_mapped () && _session) {
+	if (contents().get_mapped () && _session) {
 		for (list<TriggerStrip*>::iterator i = _strips.begin (); i != _strips.end (); ++i) {
 			(*i)->fast_update ();
 		}
@@ -769,6 +868,14 @@ void
 TriggerPage::register_actions ()
 {
 	Glib::RefPtr<ActionGroup> trigger_actions = ActionManager::create_action_group (bindings, X_("Cues"));
+
+	/* attachments visibility (editor-mixer-strip, bottom properties, sidebar list) */
+
+	Glib::RefPtr<Action> act = ActionManager::register_toggle_action (trigger_actions, "ToggleTriggerList", _("(Cue Page) Show Sidebar List"), sigc::mem_fun (*this, &Tabbable::att_right_button_toggled));
+	right_attachment_button.set_related_action (act);
+
+	act = ActionManager::register_toggle_action (trigger_actions, "ToggleTriggerProps", _("(Cue Page) Show Properties Bottom"), sigc::mem_fun (*this, &Tabbable::att_bottom_button_toggled));
+	bottom_attachment_button.set_related_action (act);
 
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));
 	ActionManager::register_action (trigger_actions, "clear-trigger-slot-alt", _("Clear Selected Slot"), sigc::mem_fun (*this, &TriggerPage::clear_selected_slot));

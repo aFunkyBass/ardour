@@ -35,7 +35,7 @@ enum ItemType {
 	SelectionItem,
 	ControlPointItem,
 	GainLineItem,
-	AutomationLineItem,
+	EditorAutomationLineItem,
 	MeterMarkerItem,
 	BBTMarkerItem,
 	TempoCurveItem,
@@ -69,6 +69,8 @@ enum ItemType {
 	GridZoneItem,
 	VelocityItem,
 	VelocityBaseItem,
+	ClipStartItem,
+	ClipEndItem,
 
 	/* don't remove this */
 

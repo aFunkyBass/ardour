@@ -103,6 +103,7 @@ ArdourButton::ArdourButton (Element e, bool toggle)
 	UIConfigurationBase::instance().ColorsChanged.connect (sigc::mem_fun (*this, &ArdourButton::color_handler));
 	/* This is not provided by gtkmm */
 	signal_grab_broken_event().connect (sigc::mem_fun (*this, &ArdourButton::on_grab_broken_event));
+	add_events (Gdk::TOUCH_BEGIN_MASK | Gdk::TOUCH_END_MASK);
 }
 
 ArdourButton::ArdourButton (const std::string& str, Element e, bool toggle)
@@ -154,6 +155,7 @@ ArdourButton::ArdourButton (const std::string& str, Element e, bool toggle)
 	UIConfigurationBase::instance().DPIReset.connect (sigc::mem_fun (*this, &ArdourButton::on_name_changed));
 	/* This is not provided by gtkmm */
 	signal_grab_broken_event().connect (sigc::mem_fun (*this, &ArdourButton::on_grab_broken_event));
+	add_events (Gdk::TOUCH_BEGIN_MASK | Gdk::TOUCH_END_MASK);
 }
 
 ArdourButton::~ArdourButton()
@@ -761,7 +763,10 @@ ArdourButton::on_size_request (Gtk::Requisition* req)
 		req->width  = wh;
 		req->height = wh;
 	}
-	else if (_tweaks & Square) {
+	else if (_tweaks & (Square | ExpandtoSquare)) {
+		if (_squaresize.has_value ()) {
+			req->width = std::max (req->width, _squaresize.value ());
+		}
 		// currerntly unused (again)
 		if (req->width < req->height)
 			req->width = req->height;
@@ -944,6 +949,42 @@ ArdourButton::set_led_left (bool yn)
 }
 
 bool
+ArdourButton::on_touch_begin_event (GdkEventTouch *ev)
+{
+	printf ("ArdourButton::on_touch_begin_event finger %d\n", ev->sequence);
+	focus_handler (this);
+
+	CairoWidget::set_dirty ();
+
+	if (!_act_on_release) {
+		if (_action) {
+			_action->activate ();
+		} else if (_auto_toggle) {
+			set_active (!get_active ());
+			signal_clicked ();
+		}
+	}
+	return true;
+}
+
+bool
+ArdourButton::on_touch_end_event (GdkEventTouch *ev)
+{
+	printf ("ArdourButton::on_touch_end_event finger: %d\n", ev->sequence);
+	CairoWidget::set_dirty ();
+
+	if (_act_on_release && _auto_toggle && !_action) {
+		set_active (!get_active ());
+	}
+	signal_clicked ();
+	if (_act_on_release && _action) {
+		_action->activate ();
+	}
+
+	return true;
+}
+
+bool
 ArdourButton::on_button_press_event (GdkEventButton *ev)
 {
 	focus_handler (this);
@@ -1036,6 +1077,15 @@ ArdourButton::on_size_allocate (Allocation& alloc)
 		/* re-center text */
 		//_layout->get_pixel_size (_text_width, _text_height);
 	}
+	if (_tweaks & ExpandtoSquare && alloc.get_width () != alloc.get_height ()) {
+		if (!_squaresize.has_value ()) {
+			_squaresize = std::max (alloc.get_width (), alloc.get_height ());
+			queue_resize ();
+		} else {
+			/* allow widget to shink next time */
+			_squaresize.reset ();
+		}
+	}
 }
 
 void
@@ -1054,7 +1104,7 @@ ArdourButton::watch ()
 		warning << _("button cannot watch state of non-existing Controllable\n") << endmsg;
 		return;
 	}
-	c->Changed.connect (watch_connection, invalidator(*this), boost::bind (&ArdourButton::controllable_changed, this), gui_context());
+	c->Changed.connect (watch_connection, invalidator(*this), std::bind (&ArdourButton::controllable_changed, this), gui_context());
 }
 
 void
@@ -1296,6 +1346,7 @@ ArdourButton::set_tweaks (Tweaks t)
 {
 	if (_tweaks != t) {
 		_tweaks = t;
+		_squaresize.reset ();
 		if (get_realized()) {
 			queue_resize ();
 		}

@@ -22,7 +22,7 @@
 
 #include <atomic>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 #include "evoral/Curve.h"
 
@@ -69,7 +69,7 @@ public:
 
 	LIBARDOUR_API int set_state (const XMLNode&, int version);
 
-	PBD::Signal0<void> AlignmentStyleChanged;
+	PBD::Signal<void()> AlignmentStyleChanged;
 
 	LIBARDOUR_API float buffer_load () const;
 
@@ -96,7 +96,7 @@ public:
 	LIBARDOUR_API void internal_playback_seek (sampleoffset_t distance);
 	LIBARDOUR_API int  seek (samplepos_t sample, bool complete_refill = false);
 
-	LIBARDOUR_API static PBD::Signal0<void> Underrun;
+	LIBARDOUR_API static PBD::Signal<void()> Underrun;
 
 	LIBARDOUR_API void playlist_modified ();
 	LIBARDOUR_API void reset_tracker ();
@@ -210,8 +210,8 @@ private:
 	sampleoffset_t        _declick_offs;
 	bool                  _declick_enabled;
 	MidiNoteTracker      _tracker;
-	boost::optional<bool> _last_read_reversed;
-	boost::optional<bool> _last_read_loop;
+	std::optional<bool> _last_read_reversed;
+	std::optional<bool> _last_read_loop;
 
 	static samplecnt_t _chunk_samples;
 

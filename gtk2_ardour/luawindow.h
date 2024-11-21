@@ -15,8 +15,7 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#ifndef __ardour_luawindow_h__
-#define __ardour_luawindow_h__
+#pragma once
 
 #include <glibmm/thread.h>
 
@@ -40,6 +39,8 @@
 
 #include "widgets/ardour_button.h"
 #include "widgets/ardour_dropdown.h"
+
+#include "ardour_window.h"
 
 class LuaWindow :
 	public ArdourWindow,
@@ -140,4 +141,3 @@ private:
 };
 
 
-#endif

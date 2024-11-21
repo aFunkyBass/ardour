@@ -142,8 +142,8 @@ public:
 	void slide (iterator before, Temporal::timecnt_t const &  distance);
 	void shift (Temporal::timepos_t const & before, Temporal::timecnt_t const & distance);
 
-	void y_transform (boost::function<double(double)> callback);
-	void list_merge (ControlList const& other, boost::function<double(double, double)> callback);
+	void y_transform (std::function<double(double)> callback);
+	void list_merge (ControlList const& other, std::function<double(double, double)> callback);
 
 	/** Add an event to this list.
 	 *
@@ -362,11 +362,11 @@ public:
 	bool in_write_pass () const;
 	bool in_new_write_pass () { return new_write_pass; }
 
-	PBD::Signal0<void> WritePassStarted;
+	PBD::Signal<void()> WritePassStarted;
 	/** Emitted when mark_dirty() is called on this object */
-	mutable PBD::Signal0<void> Dirty;
+	mutable PBD::Signal<void()> Dirty;
 	/** Emitted when our interpolation style changes */
-	PBD::Signal1<void, InterpolationStyle> InterpolationChanged;
+	PBD::Signal<void(InterpolationStyle)> InterpolationChanged;
 
 	bool operator!= (ControlList const &) const;
 

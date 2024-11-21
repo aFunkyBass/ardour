@@ -25,6 +25,7 @@
 #include <gtkmm/alignment.h>
 #include <gtkmm/box.h>
 #include <gtkmm/drawingarea.h>
+#include <gtkmm/entry.h>
 #include <gtkmm/eventbox.h>
 #include <gtkmm/separator.h>
 #include <gtkmm/sizegroup.h>
@@ -78,8 +79,8 @@ public:
 	int  summary_xpos () const;
 	int  summary_width () const;
 
-	static PBD::Signal1<void, TrackRecordAxis*> CatchDeletion;
-	static PBD::Signal2<void, TrackRecordAxis*, bool> EditNextName;
+	static PBD::Signal<void(TrackRecordAxis*)> CatchDeletion;
+	static PBD::Signal<void(TrackRecordAxis*, bool)> EditNextName;
 
 protected:
 	void self_delete ();

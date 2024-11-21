@@ -18,8 +18,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_uri_map_h__
-#define __ardour_uri_map_h__
+#pragma once
 
 #include <map>
 
@@ -42,11 +41,13 @@ namespace ARDOUR {
  * This just uses a pair of std::map and is not so great in the space overhead
  * department, but it's fast enough and not really performance critical anyway.
  */
-class LIBARDOUR_API URIMap : public boost::noncopyable {
+class LIBARDOUR_API URIMap {
 public:
 	static URIMap& instance();
 
 	URIMap();
+	URIMap(const URIMap&) = delete;
+	URIMap& operator=(const URIMap&) = delete;
 
 	LV2_Feature* urid_map_feature()   { return &_urid_map_feature; }
 	LV2_Feature* urid_unmap_feature() { return &_urid_unmap_feature; }
@@ -149,4 +150,3 @@ private:
 
 } // namespace ARDOUR
 
-#endif // __ardour_uri_map_h__

@@ -103,7 +103,7 @@ using namespace std;
 using namespace ArdourMeter;
 
 MixerStrip* MixerStrip::_entered_mixer_strip;
-PBD::Signal1<void,MixerStrip*> MixerStrip::CatchDeletion;
+PBD::Signal<void(MixerStrip*)> MixerStrip::CatchDeletion;
 
 #define PX_SCALE(px) std::max((float)px, rintf((float)px * UIConfiguration::instance().get_ui_scale()))
 
@@ -112,10 +112,9 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, bool in_mixer)
 	, RouteUI (sess)
 	, _mixer(mx)
 	, _mixer_owned (in_mixer)
-	, processor_box (sess, boost::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
+	, processor_box (sess, std::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
 	, gpm (sess, 250)
 	, panners (sess)
-	, trigger_display (-1., TriggerBox::default_triggers_per_box*16.)
 	, button_size_group (Gtk::SizeGroup::create (Gtk::SIZE_GROUP_HORIZONTAL))
 	, rec_mon_table (2, 2)
 	, solo_iso_table (1, 2)
@@ -150,10 +149,9 @@ MixerStrip::MixerStrip (Mixer_UI& mx, Session* sess, std::shared_ptr<Route> rt, 
 	, RouteUI (sess)
 	, _mixer(mx)
 	, _mixer_owned (in_mixer)
-	, processor_box (sess, boost::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
+	, processor_box (sess, std::bind (&MixerStrip::plugin_selector, this), mx.selection(), this, in_mixer)
 	, gpm (sess, 250)
 	, panners (sess)
-	, trigger_display (-1., 8*16.)
 	, button_size_group (Gtk::SizeGroup::create (Gtk::SIZE_GROUP_HORIZONTAL))
 	, rec_mon_table (2, 2)
 	, solo_iso_table (1, 2)
@@ -335,7 +333,6 @@ MixerStrip::init ()
 	global_vpacker.pack_start (name_button, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (input_button_box, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (invert_button_box, Gtk::PACK_SHRINK);
-	global_vpacker.pack_start (trigger_display, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (_tmaster_widget, Gtk::PACK_SHRINK);
 	global_vpacker.pack_start (processor_box, true, true);
 	global_vpacker.pack_start (panners, Gtk::PACK_SHRINK);
@@ -420,24 +417,23 @@ MixerStrip::init ()
 	*/
 	_visibility.add (&input_button_box, X_("Input"), _("Input"), false);
 	_visibility.add (&invert_button_box, X_("PhaseInvert"), _("Phase Invert"), false);
-	_visibility.add (&rec_mon_table, X_("RecMon"), _("Record & Monitor"), false, boost::bind (&MixerStrip::override_rec_mon_visibility, this));
+	_visibility.add (&rec_mon_table, X_("RecMon"), _("Record & Monitor"), false, std::bind (&MixerStrip::override_rec_mon_visibility, this));
 	_visibility.add (&solo_iso_table, X_("SoloIsoLock"), _("Solo Iso / Lock"), false);
 	_visibility.add (&output_button, X_("Output"), _("Output"), false);
 	_visibility.add (&_comment_button, X_("Comments"), _("Comments"), false);
 	_visibility.add (&control_slave_ui, X_("VCA"), _("VCA Assigns"), false);
-	_visibility.add (&trigger_display, X_("TriggerGrid"), _("Trigger Grid"), false);
 	_visibility.add (&_tmaster_widget, X_("TriggerMaster"), _("Trigger Master"), false);
 
 	parameter_changed (X_("mixer-element-visibility"));
 	UIConfiguration::instance().ParameterChanged.connect (sigc::mem_fun (*this, &MixerStrip::parameter_changed));
-	 Config->ParameterChanged.connect (_config_connection, invalidator (*this), boost::bind (&MixerStrip::parameter_changed, this, _1), gui_context());
-	 _session->config.ParameterChanged.connect (_config_connection, invalidator (*this), boost::bind (&MixerStrip::parameter_changed, this, _1), gui_context());
+	 Config->ParameterChanged.connect (_config_connection, invalidator (*this), std::bind (&MixerStrip::parameter_changed, this, _1), gui_context());
+	 _session->config.ParameterChanged.connect (_config_connection, invalidator (*this), std::bind (&MixerStrip::parameter_changed, this, _1), gui_context());
 
 	//watch for mouse enter/exit so we can do some stuff
 	signal_enter_notify_event().connect (sigc::mem_fun(*this, &MixerStrip::mixer_strip_enter_event ));
 	signal_leave_notify_event().connect (sigc::mem_fun(*this, &MixerStrip::mixer_strip_leave_event ));
 
-	gpm.LevelMeterButtonPress.connect_same_thread (_level_meter_connection, boost::bind (&MixerStrip::level_meter_button_press, this, _1));
+	gpm.LevelMeterButtonPress.connect_same_thread (_level_meter_connection, std::bind (&MixerStrip::level_meter_button_press, this, _1));
 }
 
 MixerStrip::~MixerStrip ()
@@ -542,8 +538,6 @@ MixerStrip::set_route (std::shared_ptr<Route> rt)
 
 	RouteUI::set_route (rt);
 
-	set_trigger_display (rt->triggerbox());
-
 	control_slave_ui.set_stripable (std::dynamic_pointer_cast<Stripable> (rt));
 
 	/* ProcessorBox needs access to _route so that it can read
@@ -585,8 +579,8 @@ MixerStrip::set_route (std::shared_ptr<Route> rt)
 
 		if (monitor_section_button == 0 && _mixer_owned) {
 			Glib::RefPtr<Action> act = ActionManager::get_action ("Mixer", "ToggleMonitorSection");
-			_session->MonitorChanged.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::monitor_changed, this), gui_context());
-			_session->MonitorBusAddedOrRemoved.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::monitor_section_added_or_removed, this), gui_context());
+			_session->MonitorChanged.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::monitor_changed, this), gui_context());
+			_session->MonitorBusAddedOrRemoved.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::monitor_section_added_or_removed, this), gui_context());
 
 			monitor_section_button = manage (new ArdourButton);
 			monitor_changed ();
@@ -659,7 +653,7 @@ MixerStrip::set_route (std::shared_ptr<Route> rt)
 		midi_input_status_changed ();
 
 		/* follow changes */
-		midi_track()->InputActiveChanged.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::midi_input_status_changed, this), gui_context());
+		midi_track()->InputActiveChanged.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::midi_input_status_changed, this), gui_context());
 	} else {
 		if (midi_input_enable_button.get_parent()) {
 			input_button_box.remove (midi_input_enable_button);
@@ -668,7 +662,7 @@ MixerStrip::set_route (std::shared_ptr<Route> rt)
 
 	if (is_audio_track()) {
 		std::shared_ptr<AudioTrack> at = audio_track();
-		at->FreezeChange.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::map_frozen, this), gui_context());
+		at->FreezeChange.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::map_frozen, this), gui_context());
 	}
 
 	if (is_track ()) {
@@ -712,18 +706,18 @@ MixerStrip::set_route (std::shared_ptr<Route> rt)
 	route_ops_menu = 0;
 
 	_route->meter_change.connect (route_connections, invalidator (*this), bind (&MixerStrip::meter_changed, this), gui_context());
-	_route->input()->changed.connect (*this, invalidator (*this), boost::bind (&MixerStrip::update_input_display, this), gui_context());
-	_route->output()->changed.connect (*this, invalidator (*this), boost::bind (&MixerStrip::update_output_display, this), gui_context());
-	_route->route_group_changed.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::route_group_changed, this), gui_context());
+	_route->input()->changed.connect (*this, invalidator (*this), std::bind (&MixerStrip::update_input_display, this), gui_context());
+	_route->output()->changed.connect (*this, invalidator (*this), std::bind (&MixerStrip::update_output_display, this), gui_context());
+	_route->route_group_changed.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::route_group_changed, this), gui_context());
 
-	_route->io_changed.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::io_changed_proxy, this), gui_context ());
+	_route->io_changed.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::io_changed_proxy, this), gui_context ());
 
 	if (_route->panner_shell()) {
 		update_panner_choices();
-		_route->panner_shell()->Changed.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::connect_to_pan, this), gui_context());
+		_route->panner_shell()->Changed.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::connect_to_pan, this), gui_context());
 	}
 
-	_route->comment_changed.connect (route_connections, invalidator (*this), boost::bind (&MixerStrip::setup_comment_button, this), gui_context());
+	_route->comment_changed.connect (route_connections, invalidator (*this), std::bind (&MixerStrip::setup_comment_button, this), gui_context());
 
 	set_stuff_from_route ();
 
@@ -884,7 +878,7 @@ MixerStrip::connect_to_pan ()
 
 	std::shared_ptr<Pannable> p = _route->pannable ();
 
-	p->automation_state_changed.connect (panstate_connection, invalidator (*this), boost::bind (&PannerUI::pan_automation_state_changed, &panners), gui_context());
+	p->automation_state_changed.connect (panstate_connection, invalidator (*this), std::bind (&PannerUI::pan_automation_state_changed, &panners), gui_context());
 
 	/* This call reduncant, PannerUI::set_panner() connects to _panshell->Changed itself
 	 * However, that only works a panner was previously set.
@@ -1121,7 +1115,7 @@ MixerStrip::build_route_ops_menu ()
 	}
 
 	uint32_t plugin_insert_cnt = 0;
-	_route->foreach_processor (boost::bind (RouteUI::help_count_plugins, _1, & plugin_insert_cnt));
+	_route->foreach_processor (std::bind (RouteUI::help_count_plugins, _1, & plugin_insert_cnt));
 	if (active && plugin_insert_cnt > 0) {
 		items.push_back (MenuElem (_("Pin Connections..."), sigc::mem_fun (*this, &RouteUI::manage_pins)));
 	}
@@ -1644,7 +1638,7 @@ MixerStrip::show_send (std::shared_ptr<Send> send)
 
 	send->meter()->set_meter_type (_route->meter_type ());
 	send->set_metering (true);
-	_current_delivery->DropReferences.connect (send_gone_connection, invalidator (*this), boost::bind (&MixerStrip::revert_to_default_display, this), gui_context());
+	_current_delivery->DropReferences.connect (send_gone_connection, invalidator (*this), std::bind (&MixerStrip::revert_to_default_display, this), gui_context());
 
 	gain_meter().set_controls (_route, send->meter(), send->amp(), send->gain_control());
 	gain_meter().setup_meters ();
@@ -1683,8 +1677,6 @@ MixerStrip::revert_to_default_display ()
 	}
 
 	reset_strip_style ();
-
-	set_trigger_display (_route->triggerbox());
 }
 
 void
@@ -1846,24 +1838,24 @@ MixerStrip::parameter_changed (string p)
  *
  *  @return optional value that is present if visibility state should be overridden.
  */
-boost::optional<bool>
+std::optional<bool>
 MixerStrip::override_solo_visibility () const
 {
 	if (is_master ()) {
-		return boost::optional<bool> (false);
+		return std::optional<bool> (false);
 	}
 
-	return boost::optional<bool> ();
+	return std::optional<bool> ();
 }
 
-boost::optional<bool>
+std::optional<bool>
 MixerStrip::override_rec_mon_visibility () const
 {
 	if (is_master ()) {
-		return boost::optional<bool> (false);
+		return std::optional<bool> (false);
 	}
 
-	return boost::optional<bool> ();
+	return std::optional<bool> ();
 }
 
 
@@ -2140,9 +2132,3 @@ MixerStrip::hide_master_spacer (bool yn)
 	}
 }
 
-void
-MixerStrip::set_trigger_display (std::shared_ptr<TriggerBox> tb)
-{
-	_tmaster->set_triggerbox (tb);
-	trigger_display.set_triggerbox (tb.get());
-}

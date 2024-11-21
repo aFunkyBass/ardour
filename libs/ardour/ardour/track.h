@@ -19,10 +19,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_track_h__
-#define __ardour_track_h__
+#pragma once
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <memory>
 
 #include "pbd/enum_convert.h"
@@ -146,7 +145,7 @@ public:
 	void ensure_input_monitoring (bool);
 	std::list<std::shared_ptr<Source> > & last_capture_sources ();
 	std::string steal_write_source_name ();
-	void reset_write_sources (bool, bool force = false);
+	void reset_write_sources (bool mark_write_complete);
 	float playback_buffer_load () const;
 	float capture_buffer_load () const;
 	int do_refill ();
@@ -184,12 +183,12 @@ public:
 
 	void time_domain_changed ();
 
-	PBD::Signal0<void> FreezeChange;
-	PBD::Signal0<void> PlaylistChanged;
-	PBD::Signal0<void> PlaylistAdded;
-	PBD::Signal0<void> SpeedChanged;
-	PBD::Signal0<void> AlignmentStyleChanged;
-	PBD::Signal0<void> ChanCountChanged;
+	PBD::Signal<void()> FreezeChange;
+	PBD::Signal<void()> PlaylistChanged;
+	PBD::Signal<void()> PlaylistAdded;
+	PBD::Signal<void()> SpeedChanged;
+	PBD::Signal<void()> AlignmentStyleChanged;
+	PBD::Signal<void()> ChanCountChanged;
 
 protected:
 	XMLNode& state (bool save_template) const;
@@ -197,7 +196,7 @@ protected:
 	void update_input_meter ();
 
 	std::shared_ptr<Playlist>   _playlists[DataType::num_types];
-	boost::optional<MeterPoint> _saved_meter_point;
+	std::optional<MeterPoint> _saved_meter_point;
 	bool                        _record_prepared;
 	TrackMode                   _mode;
 
@@ -258,4 +257,3 @@ namespace PBD {
 	DEFINE_ENUM_CONVERT(ARDOUR::Track::FreezeState);
 }
 
-#endif /* __ardour_track_h__ */

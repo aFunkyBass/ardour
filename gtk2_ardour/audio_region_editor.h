@@ -20,8 +20,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __gtk_ardour_audio_region_edit_h__
-#define __gtk_ardour_audio_region_edit_h__
+#pragma once
 
 #include <map>
 
@@ -101,9 +100,7 @@ private:
 	void signal_peak_thread ();
 	pthread_t _peak_amplitude_thread_handle;
 	void peak_amplitude_found (double);
-	PBD::Signal1<void, double> PeakAmplitudeFound;
+	PBD::Signal<void(double)> PeakAmplitudeFound;
 	PBD::ScopedConnection _peak_amplitude_connection;
 	CrossThreadChannel _peak_channel;
 };
-
-#endif /* __gtk_ardour_audio_region_edit_h__ */

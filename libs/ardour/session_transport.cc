@@ -73,18 +73,7 @@ using namespace ARDOUR;
 using namespace PBD;
 using namespace Temporal;
 
-#ifdef NDEBUG
-# define ENSURE_PROCESS_THREAD do {} while (0)
-#else
-# define ENSURE_PROCESS_THREAD                        \
-  do {                                                \
-    if (!AudioEngine::instance()->in_process_thread() \
-        && !loading ()) {                              \
-      PBD::stacktrace (std::cerr, 30);                \
-    }                                                 \
-  } while (0)
-#endif
-
+#define ENSURE_PROCESS_THREAD do {} while (0)
 
 #define TFSM_EVENT(evtype) { _transport_fsm->enqueue (new TransportFSM::Event (evtype)); }
 #define TFSM_ROLL() { _transport_fsm->enqueue (new TransportFSM::Event (TransportFSM::StartTransport)); }
@@ -190,7 +179,7 @@ Session::locate (samplepos_t target_sample, bool for_loop_end, bool force, bool 
 	 * changes in the value of _transport_sample.
 	 */
 
-	DEBUG_TRACE (DEBUG::Transport, string_compose ("rt-locate to %1 ts = %7, for loop end %2 force %3 mmc %4\n",
+	DEBUG_TRACE (DEBUG::Transport, string_compose ("rt-locate to %1 ts = %5, for loop end %2 force %3 mmc %4\n",
 	                                               target_sample, for_loop_end, force, with_mmc, _transport_sample));
 
 	if (!force && (_transport_sample == target_sample) && !for_loop_end) {
@@ -201,10 +190,13 @@ Session::locate (samplepos_t target_sample, bool for_loop_end, bool force, bool 
 
 	// Update Timecode time
 	_transport_sample = target_sample;
-	_nominal_jack_transport_sample = boost::none;
-	// Bump seek counter so that any in-process locate in the butler
-	// thread(s?) can restart.
-	_seek_counter.fetch_add (1);
+	_nominal_jack_transport_sample = std::nullopt;
+
+	/* Note that loop wrap-around locates do not need to call "seek" */
+	if (force || !for_loop_end) {
+		/* Bump seek counter so that any in-process locate in the butler can restart */
+		_seek_counter.fetch_add (1);
+	}
 	_last_roll_or_reversal_location = target_sample;
 	if (!for_loop_end && !_exporting) {
 		_remaining_latency_preroll = worst_latency_preroll_buffer_size_ceil ();
@@ -671,7 +663,7 @@ Session::butler_completed_transport_work ()
 	ENSURE_PROCESS_THREAD;
 	PostTransportWork ptw = post_transport_work ();
 
-	DEBUG_TRACE (DEBUG::Transport, string_compose ("Butler done, RT cleanup for %1\n", enum_2_string (ptw)));
+	DEBUG_TRACE (DEBUG::Butler, string_compose ("Butler done, RT cleanup for %1\n", enum_2_string (ptw)));
 
 	if (ptw & PostTransportAudition) {
 		if (auditioner && auditioner->auditioning()) {
@@ -907,8 +899,27 @@ Session::request_stop (bool abort, bool clear_state, TransportRequestSource orig
 		solo_selection ( _soloSelection, false );
 	}
 
-	SessionEvent* ev = new SessionEvent (SessionEvent::EndRoll, SessionEvent::Add, SessionEvent::Immediate, audible_sample(), 0.0, abort, clear_state);
-	DEBUG_TRACE (DEBUG::Transport, string_compose ("Request transport stop, audible %3 transport %4 abort = %1, clear state = %2\n", abort, clear_state, audible_sample(), _transport_sample));
+	SessionEvent *ev;
+
+	if (Config->get_stop_on_grid() && _global_quantization.type == AnyTime::BBT_Offset && _transport_sample != 0) {
+		/* XXX for now this only does anything if we are quantized to
+		 * Beats. Other quantization settings require moving
+		 * Editor::snap_to() code into libardour, which is not in-scope
+		 * at the time this work is occuring.
+		 */
+
+		TempoMap::SharedPtr tmap (TempoMap::use());
+		BBT_Argument now = tmap->bbt_at (timepos_t (_transport_sample));
+		BBT_Argument rounded = tmap->round_up_to_bar (now);
+		samplepos_t samples = tmap->sample_at (rounded);
+
+		ev = new SessionEvent (SessionEvent::EndRoll, SessionEvent::Add, samples, samples, 0.0, abort, clear_state);
+		DEBUG_TRACE (DEBUG::Transport, string_compose ("Request transport stop @ %4 snapped to %1 => %2 => %3\n", samples, now, rounded, _transport_sample));
+	} else {
+		ev = new SessionEvent (SessionEvent::EndRoll, SessionEvent::Add, SessionEvent::Immediate, audible_sample(), 0.0, abort, clear_state);
+		DEBUG_TRACE (DEBUG::Transport, string_compose ("Request transport stop, audible %3 transport %4 abort = %1, clear state = %2\n", abort, clear_state, audible_sample(), _transport_sample));
+	}
+
 	queue_event (ev);
 }
 
@@ -1146,7 +1157,7 @@ Session::butler_transport_work (bool have_process_lock)
 	uint64_t before = g_get_monotonic_time();
 #endif
 
-	DEBUG_TRACE (DEBUG::Transport, string_compose ("Butler transport work, todo = [%1] (0x%3%4%5) at %2\n", enum_2_string (ptw), before, std::hex, ptw, std::dec));
+	DEBUG_TRACE (DEBUG::Butler, string_compose ("Butler transport work, todo = [%1] (0x%3%4%5) twr = %6 @ %2\n", enum_2_string (ptw), before, std::hex, ptw, std::dec, on_entry));
 
 	if (ptw & PostTransportAdjustPlaybackBuffering) {
 		/* need to prevent concurrency with ARDOUR::Reader::run(),
@@ -1200,10 +1211,11 @@ Session::butler_transport_work (bool have_process_lock)
 		}
 	}
 
-
-	if (will_locate) {
-		DEBUG_TRACE (DEBUG::Transport, string_compose ("nonrealtime locate invoked from BTW (butler has done %1, rtlocs %2)\n", butler, rtlocates));
+	if (will_locate && transport_locating ()) {
+		DEBUG_TRACE (DEBUG::Butler, string_compose ("nonrealtime locate invoked from BTW (butler has done %1, rtlocs %2)\n", butler, rtlocates));
 		non_realtime_locate ();
+	} else if (will_locate) {
+		DEBUG_TRACE (DEBUG::Butler, string_compose ("skip nonrealtime locate (butler has done %1, rtlocs %2) ts = %3\n", butler, rtlocates, _transport_fsm->current_state()));
 	}
 
 	if (ptw & PostTransportOverWrite) {
@@ -1220,7 +1232,7 @@ Session::butler_transport_work (bool have_process_lock)
 
 	(void) PBD::atomic_dec_and_test (_butler->should_do_transport_work);
 
-	DEBUG_TRACE (DEBUG::Transport, string_compose (X_("Butler transport work all done after %1 usecs @ %2 ptw %3 trw = %4\n"), g_get_monotonic_time() - before, _transport_sample, enum_2_string (post_transport_work()), _butler->transport_work_requested()));
+	DEBUG_TRACE (DEBUG::Butler, string_compose (X_("Butler transport work all done after %1 usecs tsp = %2 ptw [%3] trw = %4\n"), g_get_monotonic_time() - before, _transport_sample, enum_2_string (post_transport_work()), _butler->should_do_transport_work.load ()));
 }
 
 void
@@ -2041,7 +2053,7 @@ Session::sync_source_changed (SyncSource type, samplepos_t pos, pframes_t cycle_
 	std::shared_ptr<MTC_TransportMaster> mtc_master = std::dynamic_pointer_cast<MTC_TransportMaster> (master);
 
 	if (mtc_master) {
-		mtc_master->ActiveChanged.connect_same_thread (mtc_status_connection, boost::bind (&Session::mtc_status_changed, this, _1));
+		mtc_master->ActiveChanged.connect_same_thread (mtc_status_connection, std::bind (&Session::mtc_status_changed, this, _1));
 		MTCSyncStateChanged(mtc_master->locked() );
 	} else {
 		int canderef (1);
@@ -2054,7 +2066,7 @@ Session::sync_source_changed (SyncSource type, samplepos_t pos, pframes_t cycle_
 	std::shared_ptr<LTC_TransportMaster> ltc_master = std::dynamic_pointer_cast<LTC_TransportMaster> (master);
 
 	if (ltc_master) {
-		ltc_master->ActiveChanged.connect_same_thread (ltc_status_connection, boost::bind (&Session::ltc_status_changed, this, _1));
+		ltc_master->ActiveChanged.connect_same_thread (ltc_status_connection, std::bind (&Session::ltc_status_changed, this, _1));
 		LTCSyncStateChanged (ltc_master->locked() );
 	} else {
 		int canderef (1);
@@ -2138,10 +2150,13 @@ Session::transport_will_roll_forwards () const
 }
 
 double
-Session::transport_speed() const
+Session::transport_speed (bool incl_preroll) const
 {
 	if (_transport_fsm->transport_speed() != _transport_fsm->transport_speed()) {
 		// cerr << "\n\n!!TS " << _transport_fsm->transport_speed() << " TFSM::speed " << _transport_fsm->transport_speed() << " via " << _transport_fsm->current_state() << endl;
+	}
+	if (incl_preroll) {
+		return _transport_fsm->transport_speed();
 	}
 	return _count_in_samples > 0 ? 0. : _transport_fsm->transport_speed();
 }

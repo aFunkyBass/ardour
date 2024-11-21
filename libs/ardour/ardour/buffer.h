@@ -19,12 +19,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_buffer_h__
-#define __ardour_buffer_h__
+#pragma once
 
 #include <stddef.h>
-
-#include <boost/noncopyable.hpp>
 
 #include "ardour/libardour_visibility.h"
 #include "ardour/types.h"
@@ -42,9 +39,11 @@ namespace ARDOUR {
  *
  * To actually read/write buffer contents, use the appropriate derived class.
  */
-class LIBARDOUR_API Buffer : public boost::noncopyable
+class LIBARDOUR_API Buffer
 {
 public:
+	Buffer (const Buffer&) = delete;
+	Buffer& operator= (const Buffer&) = delete;
 	virtual ~Buffer() {}
 
 	/** Factory function */
@@ -91,4 +90,3 @@ public:
 
 } // namespace ARDOUR
 
-#endif // __ardour_buffer_h__

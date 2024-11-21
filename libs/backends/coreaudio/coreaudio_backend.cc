@@ -605,7 +605,7 @@ CoreAudioBackend::_start (bool for_latency_measurement)
 		return PortReconnectError;
 	}
 
-	if (pthread_create (&_freeewheel_thread, NULL, pthread_freewheel, this))
+	if (pbd_pthread_create (PBD_RT_STACKSIZE_PROC, &_freeewheel_thread, pthread_freewheel, this))
 	{
 		PBD::error << _("CoreAudioBackend: failed to create process thread.") << endmsg;
 		delete _pcmio; _pcmio = 0;
@@ -803,7 +803,7 @@ CoreAudioBackend::coreaudio_process_thread (void *arg)
 	}
 #endif
 
-	boost::function<void ()> f = td->f;
+	std::function<void ()> f = td->f;
 	f ();
 
 #if MAC_OS_X_VERSION_MAX_ALLOWED >= 110000
@@ -816,7 +816,7 @@ CoreAudioBackend::coreaudio_process_thread (void *arg)
 }
 
 int
-CoreAudioBackend::create_process_thread (boost::function<void()> func)
+CoreAudioBackend::create_process_thread (std::function<void()> func)
 {
 	pthread_t   thread_id;
 	ThreadData* td = new ThreadData (this, func, PBD_RT_STACKSIZE_PROC, 1e9 * _samples_per_period / _samplerate);
@@ -829,7 +829,7 @@ CoreAudioBackend::create_process_thread (boost::function<void()> func)
 	}
 #endif
 
-	if (pbd_realtime_pthread_create (PBD_SCHED_FIFO, PBD_RT_PRI_PROC, PBD_RT_STACKSIZE_PROC,
+	if (pbd_realtime_pthread_create ("CoreAudio Proc", PBD_SCHED_FIFO, PBD_RT_PRI_PROC, PBD_RT_STACKSIZE_PROC,
 	                              &thread_id, coreaudio_process_thread, td)) {
 		if (pbd_pthread_create (PBD_RT_STACKSIZE_PROC, &thread_id, coreaudio_process_thread, td)) {
 			PBD::error << _("AudioEngine: cannot create process thread.") << endmsg;
@@ -1158,7 +1158,7 @@ CoreAudioBackend::set_latency_range (PortEngine::PortHandle port_handle, bool fo
 {
 	std::shared_ptr<BackendPort> port = std::dynamic_pointer_cast<BackendPort> (port_handle);
 	if (!valid_port (port)) {
-		DEBUG_TRACE (PBD::DEBUG::BackendPorts, "BackendPort::set_latency_range (): invalid port.");
+		DEBUG_TRACE (PBD::DEBUG::BackendPorts, "CoreAudioBackend::set_latency_range (): invalid port.");
 		return;
 	}
 	port->set_latency_range (latency_range, for_playback);
@@ -1170,7 +1170,7 @@ CoreAudioBackend::get_latency_range (PortEngine::PortHandle port_handle, bool fo
 	std::shared_ptr<BackendPort> port = std::dynamic_pointer_cast<BackendPort> (port_handle);
 	LatencyRange r;
 	if (!valid_port (port)) {
-		DEBUG_TRACE (PBD::DEBUG::BackendPorts, "BackendPort::get_latency_range (): invalid port.");
+		DEBUG_TRACE (PBD::DEBUG::BackendPorts, "CoreAudioBackend::get_latency_range (): invalid port.");
 		r.min = 0;
 		r.max = 0;
 		return r;

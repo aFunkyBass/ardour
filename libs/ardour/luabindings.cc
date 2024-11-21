@@ -22,6 +22,7 @@
 
 #include <glibmm.h>
 
+#include "pbd/history_owner.h"
 #include "pbd/stateful_diff_command.h"
 #include "pbd/openuri.h"
 #include "pbd/progress.h"
@@ -31,6 +32,7 @@
 
 #include "evoral/Control.h"
 #include "evoral/ControlList.h"
+#include "evoral/PatchChange.h"
 
 #include "ardour/amp.h"
 #include "ardour/async_midi_port.h"
@@ -224,6 +226,7 @@ CLASSINFO(ArdourMarker);
 CLASSINFO(AudioRegionView);
 CLASSINFO(AxisView);
 CLASSINFO(MarkerSelection);
+CLASSINFO(EditingContext);
 CLASSINFO(PublicEditor);
 CLASSINFO(RegionSelection);
 CLASSINFO(RegionView);
@@ -268,6 +271,7 @@ CLASSKEYS(ARDOUR::LuaOSC::Address);
 CLASSKEYS(ARDOUR::LuaProc);
 CLASSKEYS(ARDOUR::LuaTableRef);
 CLASSKEYS(ARDOUR::MidiModel::NoteDiffCommand);
+CLASSKEYS(ARDOUR::MidiModel::SysExDiffCommand);
 CLASSKEYS(ARDOUR::MonitorProcessor);
 CLASSKEYS(ARDOUR::RouteGroup);
 CLASSKEYS(ARDOUR::ParameterDescriptor);
@@ -293,6 +297,7 @@ CLASSKEYS(Temporal::superclock_t)
 
 CLASSKEYS(PBD::ID);
 CLASSKEYS(PBD::Configuration);
+CLASSKEYS(PBD::HistoryOwner);
 CLASSKEYS(PBD::PropertyChange);
 CLASSKEYS(PBD::StatefulDestructible);
 
@@ -349,7 +354,9 @@ CLASSKEYS(std::shared_ptr<ARDOUR::Region>);
 CLASSKEYS(std::shared_ptr<ARDOUR::SessionPlaylists>);
 CLASSKEYS(std::shared_ptr<ARDOUR::Track>);
 CLASSKEYS(std::shared_ptr<Evoral::ControlList>);
+CLASSKEYS(std::shared_ptr<Evoral::Event<Temporal::Beats> >);
 CLASSKEYS(std::shared_ptr<Evoral::Note<Temporal::Beats> >);
+CLASSKEYS(std::shared_ptr<Evoral::PatchChange<Temporal::Beats> >);
 CLASSKEYS(std::shared_ptr<Evoral::Sequence<Temporal::Beats> >);
 
 CLASSKEYS(std::shared_ptr<ARDOUR::Playlist>);
@@ -497,6 +504,16 @@ LuaBindings::common (lua_State* L)
 		.endClass ()
 
 		.beginClass <PBD::Progress> ("Progress")
+		.endClass ()
+
+		.beginClass <PBD::HistoryOwner> ("HistoryOwner")
+			.addFunction ("begin_reversible_command", (void (PBD::HistoryOwner::*)(const std::string&))&PBD::HistoryOwner::begin_reversible_command)
+			.addFunction ("commit_reversible_command", &PBD::HistoryOwner::commit_reversible_command)
+			.addFunction ("abort_reversible_command", &PBD::HistoryOwner::abort_reversible_command)
+			.addFunction ("collected_undo_commands", &PBD::HistoryOwner::collected_undo_commands)
+			.addFunction ("abort_empty_reversible_command", &PBD::HistoryOwner::abort_empty_reversible_command)
+			.addFunction ("add_command", &PBD::HistoryOwner::add_command)
+			.addFunction ("add_stateful_diff_command", &PBD::HistoryOwner::add_stateful_diff_command)
 		.endClass ()
 
 		.beginClass <PBD::Stateful> ("Stateful")
@@ -970,6 +987,18 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("off_velocity", &Evoral::Note<Temporal::Beats>::off_velocity)
 		.addFunction ("length", &Evoral::Note<Temporal::Beats>::length)
 		.addFunction ("channel", &Evoral::Note<Temporal::Beats>::channel)
+		.endClass ()
+
+		.beginWSPtrClass <Evoral::Event<Temporal::Beats> > ("EventPtr")
+		.addFunction ("time", &Evoral::Event<Temporal::Beats>::time)
+		.addFunction ("size", &Evoral::Event<Temporal::Beats>::size)
+		//.addFunction ("buffer", (uint8_t*) &Evoral::Event<Temporal::Beats>::buffer)
+		.endClass ()
+
+		.beginWSPtrClass <Evoral::PatchChange<Temporal::Beats> > ("PatchChangePtr")
+		.addFunction ("time", &Evoral::PatchChange<Temporal::Beats>::time)
+		.addFunction ("bank", &Evoral::PatchChange<Temporal::Beats>::bank)
+		.addFunction ("program", &Evoral::PatchChange<Temporal::Beats>::program)
 		.endClass ()
 
 		/* libevoral enums */
@@ -1638,12 +1667,10 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("has_transients", &Region::has_transients)
 		.addFunction ("transients", (AnalysisFeatureList (Region::*)())&Region::transients)
 
-#ifndef NDEBUG // disable region FX for now
 		.addFunction ("load_plugin", &Region::load_plugin)
 		.addFunction ("add_plugin", &Region::add_plugin)
 		.addFunction ("remove_plugin", &Region::add_plugin)
 		.addFunction ("nth_plugin", &Region::nth_plugin)
-#endif
 
 		/* editing operations */
 		.addFunction ("set_length", &Region::set_length)
@@ -1790,9 +1817,11 @@ LuaBindings::common (lua_State* L)
 		.endClass ()
 
 		.deriveWSPtrClass <MidiModel, AutomatableSequence<Temporal::Beats> > ("MidiModel")
-		.addFunction ("apply_command", (void (MidiModel::*)(Session*, PBD::Command*))&MidiModel::apply_diff_command_as_commit) /* deprecated: left here in case any extant scripts use apply_command */
-		.addFunction ("apply_diff_command_as_commit", (void (MidiModel::*)(Session*, PBD::Command*))&MidiModel::apply_diff_command_as_commit)
+		.addFunction ("apply_command", (void (MidiModel::*)(PBD::HistoryOwner*, PBD::Command*))&MidiModel::apply_diff_command_as_commit) /* deprecated: left here in case any extant scripts use apply_command */
+		.addFunction ("apply_diff_command_as_commit", (void (MidiModel::*)(PBD::HistoryOwner*, PBD::Command*))&MidiModel::apply_diff_command_as_commit)
 		.addFunction ("new_note_diff_command", &MidiModel::new_note_diff_command)
+		.addFunction ("new_sysex_diff_command", &MidiModel::new_sysex_diff_command)
+		.addFunction ("new_patch_change_diff_command", &MidiModel::new_patch_change_diff_command)
 		.endClass ()
 
 		.beginNamespace ("MidiModel")
@@ -1802,6 +1831,16 @@ LuaBindings::common (lua_State* L)
 		.deriveClass<ARDOUR::MidiModel::NoteDiffCommand, ARDOUR::MidiModel::DiffCommand> ("NoteDiffCommand")
 		.addFunction ("add", &ARDOUR::MidiModel::NoteDiffCommand::add)
 		.addFunction ("remove", &ARDOUR::MidiModel::NoteDiffCommand::remove)
+		.endClass ()
+
+		.deriveClass<ARDOUR::MidiModel::SysExDiffCommand, ARDOUR::MidiModel::DiffCommand> ("NoteDiffCommand")
+		.addFunction ("change", &ARDOUR::MidiModel::SysExDiffCommand::change)
+		.addFunction ("remove", &ARDOUR::MidiModel::SysExDiffCommand::remove)
+		.endClass ()
+
+		.deriveClass<ARDOUR::MidiModel::PatchChangeDiffCommand, ARDOUR::MidiModel::DiffCommand> ("NoteDiffCommand")
+		.addFunction ("add", &ARDOUR::MidiModel::PatchChangeDiffCommand::add)
+		.addFunction ("remove", &ARDOUR::MidiModel::PatchChangeDiffCommand::remove)
 		.endClass ()
 
 		.endNamespace () /* ARDOUR::MidiModel */
@@ -2344,6 +2383,12 @@ LuaBindings::common (lua_State* L)
 		.beginStdList <std::shared_ptr<Evoral::Note<Temporal::Beats> > > ("NotePtrList")
 		.endClass ()
 
+		.beginStdList <std::shared_ptr<Evoral::Event<Temporal::Beats> > > ("EventPtrList")
+		.endClass ()
+
+		.beginStdList <std::shared_ptr<Evoral::PatchChange<Temporal::Beats> > > ("PatchChangePtrList")
+		.endClass ()
+
 		.beginConstStdCPtrList <Evoral::ControlEvent> ("EventList")
 		.endClass ()
 
@@ -2537,6 +2582,7 @@ LuaBindings::common (lua_State* L)
 		.beginNamespace ("MidiTrackNameSource")
 		.addConst ("SMFTrackNumber", ARDOUR::MidiTrackNameSource(SMFTrackNumber))
 		.addConst ("SMFTrackName", ARDOUR::MidiTrackNameSource(SMFTrackName))
+		.addConst ("SMFFileAndTrackName", ARDOUR::MidiTrackNameSource(SMFFileAndTrackName))
 		.addConst ("SMFInstrumentName", ARDOUR::MidiTrackNameSource(SMFInstrumentName))
 		.endNamespace ()
 
@@ -2960,7 +3006,7 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("set_" # var, &RCConfiguration::set_##var) \
 		.addProperty (#var, &RCConfiguration::get_##var, &RCConfiguration::set_##var)
 
-#include "ardour/rc_configuration_vars.h"
+#include "ardour/rc_configuration_vars.inc.h"
 
 #undef CONFIG_VARIABLE
 #undef CONFIG_VARIABLE_SPECIAL
@@ -2979,7 +3025,7 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("set_" # var, &SessionConfiguration::set_##var) \
 		.addProperty (#var, &SessionConfiguration::get_##var, &SessionConfiguration::set_##var)
 
-#include "ardour/session_configuration_vars.h"
+#include "ardour/session_configuration_vars.inc.h"
 
 #undef CONFIG_VARIABLE
 #undef CONFIG_VARIABLE_SPECIAL
@@ -2994,7 +3040,7 @@ LuaBindings::common (lua_State* L)
 	// functions which can be used from realtime and non-realtime contexts
 	luabridge::getGlobalNamespace (L)
 		.beginNamespace ("ARDOUR")
-		.beginClass <Session> ("Session")
+		.deriveClass <Session, PBD::HistoryOwner> ("Session")
 		.addFunction ("scripts_changed", &Session::scripts_changed) // used internally
 		.addFunction ("engine_speed", &Session::engine_speed)
 		.addFunction ("actual_speed", &Session::actual_speed)
@@ -3080,13 +3126,6 @@ LuaBindings::common (lua_State* L)
 		.addFunction ("set_controls", &Session::set_controls)
 		.addFunction ("set_control", &Session::set_control)
 		.addFunction ("set_exclusive_input_active", &Session::set_exclusive_input_active)
-		.addFunction ("begin_reversible_command", (void (Session::*)(const std::string&))&Session::begin_reversible_command)
-		.addFunction ("commit_reversible_command", &Session::commit_reversible_command)
-		.addFunction ("abort_reversible_command", &Session::abort_reversible_command)
-		.addFunction ("collected_undo_commands", &Session::collected_undo_commands)
-		.addFunction ("abort_empty_reversible_command", &Session::abort_empty_reversible_command)
-		.addFunction ("add_command", &Session::add_command)
-		.addFunction ("add_stateful_diff_command", &Session::add_stateful_diff_command)
 		.addFunction ("playlists", &Session::playlists)
 		.addFunction ("engine", (AudioEngine& (Session::*)())&Session::engine)
 		.addFunction ("get_block_size", &Session::get_block_size)
@@ -3123,9 +3162,9 @@ LuaBindings::common (lua_State* L)
 		.beginNamespace ("Session")
 
 		.beginNamespace ("RecordState")
-		.addConst ("Disabled", ARDOUR::Session::RecordState(Session::Disabled))
-		.addConst ("Enabled", ARDOUR::Session::RecordState(Session::Enabled))
-		.addConst ("Recording", ARDOUR::Session::RecordState(Session::Recording))
+		.addConst ("Disabled", ARDOUR::RecordState(ARDOUR::Disabled))
+		.addConst ("Enabled", ARDOUR::RecordState(ARDOUR::Enabled))
+		.addConst ("Recording", ARDOUR::RecordState(ARDOUR::Recording))
 		.endNamespace ()
 
 		.endNamespace () // end Session enums
@@ -3176,6 +3215,8 @@ LuaBindings::common (lua_State* L)
 		.addCFunction ("build_filename", ARDOUR::LuaAPI::build_filename)
 		.addFunction ("new_noteptr", ARDOUR::LuaAPI::new_noteptr)
 		.addFunction ("note_list", ARDOUR::LuaAPI::note_list)
+		.addFunction ("sysex_list", ARDOUR::LuaAPI::sysex_list)
+		.addFunction ("patch_change_list", ARDOUR::LuaAPI::patch_change_list)
 		.addCFunction ("sample_to_timecode", ARDOUR::LuaAPI::sample_to_timecode)
 		.addCFunction ("timecode_to_sample", ARDOUR::LuaAPI::timecode_to_sample)
 		.addFunction ("wait_for_process_callback", ARDOUR::LuaAPI::wait_for_process_callback)

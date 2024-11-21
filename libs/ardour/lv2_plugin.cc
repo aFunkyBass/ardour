@@ -157,9 +157,11 @@ uint32_t      LV2Plugin::_ui_contrasting_color = 0x33ff33ff; // RGBA
 unsigned long LV2Plugin::_ui_transient_win_id  = 0;
 
 
-class LV2World : boost::noncopyable {
+class LV2World {
 public:
 	LV2World ();
+	LV2World (const LV2World&) = delete;
+	LV2World& operator= (const LV2World&) = delete;
 	~LV2World ();
 
 	void load_bundled_plugins(bool verbose=false);
@@ -607,7 +609,7 @@ LV2Plugin::init(const void* c_plugin, samplecnt_t rate)
 	static const int32_t _min_block_length = 1;   // may happen during split-cycles
 	static const int32_t _max_block_length = 8192; // max possible (with all engines and during export)
 	static const int32_t rt_policy = PBD_SCHED_FIFO;
-	static const int32_t rt_priority = pbd_absolute_rt_priority (PBD_SCHED_FIFO, AudioEngine::instance()->client_real_time_priority () - 1);
+	static const int32_t rt_priority = pbd_absolute_rt_priority (PBD_SCHED_FIFO, PBD_RT_PRI_PROC);
 	static const int32_t hw_concurrency = how_many_dsp_threads ();
 	/* Consider updating max-block-size whenever the buffersize changes.
 	 * It requires re-instantiating the plugin (which is a non-realtime operation),
@@ -3790,7 +3792,7 @@ LV2PluginInfo::get_presets (bool user_only) const
 }
 
 PluginInfoList*
-LV2PluginInfo::discover (boost::function <void (std::string const&, PluginScanLogEntry::PluginScanResult, std::string const&, bool)> cb)
+LV2PluginInfo::discover (std::function <void (std::string const&, PluginScanLogEntry::PluginScanResult, std::string const&, bool)> cb)
 {
 	LV2World world;
 	world.load_bundled_plugins();
@@ -3979,7 +3981,9 @@ LV2PluginInfo::discover (boost::function <void (std::string const&, PluginScanLo
 				}
 			}
 			else if (lilv_port_has_property(p, port, world.lv2_connectionOptional)) {
+				LilvNode* name = lilv_port_get_name(p, port);
 				cb (uri, PluginScanLogEntry::OK, string_compose (_("Ignored optional port %1 ('%2') which has unsupported data type."), i, lilv_node_as_string (name)), false);
+				lilv_node_free(name);
 			}
 			else if (!lilv_port_is_a(p, port, world.lv2_AudioPort)) {
 				err = 1;

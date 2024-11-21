@@ -21,8 +21,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_region_h__
-#define __ardour_region_h__
+#pragma once
 
 #include <memory>
 #include <vector>
@@ -112,9 +111,9 @@ public:
 
 	static void make_property_quarks ();
 
-	static PBD::Signal2<void,std::shared_ptr<RegionList>, const PBD::PropertyChange&> RegionsPropertyChanged;
+	static PBD::Signal<void(std::shared_ptr<RegionList>, const PBD::PropertyChange&)> RegionsPropertyChanged;
 
-	PBD::Signal0<void> RegionFxChanged;
+	PBD::Signal<void()> RegionFxChanged;
 
 	typedef std::map <PBD::PropertyChange, RegionList> ChangeMap;
 
@@ -530,7 +529,7 @@ public:
 		return std::shared_ptr<RegionFxPlugin> ();
 	}
 
-	void foreach_plugin (boost::function<void(std::weak_ptr<RegionFxPlugin>)> method) const {
+	void foreach_plugin (std::function<void(std::weak_ptr<RegionFxPlugin>)> method) const {
 		Glib::Threads::RWLock::ReaderLock lm (_fx_lock);
 		for (auto const& i : _plugins) {
 			method (std::weak_ptr<RegionFxPlugin> (i));
@@ -679,4 +678,3 @@ private:
 
 } /* namespace ARDOUR */
 
-#endif /* __ardour_region_h__ */

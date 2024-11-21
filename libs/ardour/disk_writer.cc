@@ -45,7 +45,7 @@ using namespace PBD;
 using namespace std;
 
 ARDOUR::samplecnt_t DiskWriter::_chunk_samples = DiskWriter::default_chunk_samples ();
-PBD::Signal0<void> DiskWriter::Overrun;
+PBD::Signal<void()> DiskWriter::Overrun;
 
 DiskWriter::DiskWriter (Session& s, Track& t, string const & str, DiskIOProcessor::Flag f)
 	: DiskIOProcessor (s, t, X_("recorder:") + str, f, Temporal::TimeDomainProvider (Config->get_default_automation_time_domain()))
@@ -97,9 +97,6 @@ DiskWriter::display_name () const
 void
 DiskWriter::WriterChannelInfo::resize (samplecnt_t bufsize)
 {
-	if (!capture_transition_buf) {
-		capture_transition_buf = new RingBufferNPT<CaptureTransition> (256);
-	}
 	delete wbuf;
 	wbuf = new RingBufferNPT<Sample> (bufsize);
 	/* touch memory to lock it */
@@ -109,8 +106,9 @@ DiskWriter::WriterChannelInfo::resize (samplecnt_t bufsize)
 int
 DiskWriter::add_channel_to (std::shared_ptr<ChannelList> c, uint32_t how_many)
 {
+	samplecnt_t bufsz = std::max<samplecnt_t> (_chunk_samples * 2, _session.butler()->audio_capture_buffer_size());
 	while (how_many--) {
-		c->push_back (new WriterChannelInfo (_session.butler()->audio_capture_buffer_size()));
+		c->push_back (new WriterChannelInfo (bufsz));
 		DEBUG_TRACE (DEBUG::DiskIO, string_compose ("%1: new writer channel, write space = %2 read = %3\n",
 		                                            name(),
 		                                            c->back()->wbuf->write_space(),
@@ -392,7 +390,7 @@ DiskWriter::set_state (const XMLNode& node, int version)
 	node.get_property (X_("record-safe"), rec_safe);
 	_record_safe.store (rec_safe);
 
-	reset_write_sources (false, true);
+	reset_write_sources (false);
 
 	return 0;
 }
@@ -535,7 +533,7 @@ DiskWriter::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_samp
 			if (_midi_write_source) {
 				assert (_capture_start_sample);
 
-				timepos_t start (_capture_start_sample.get());
+				timepos_t start (_capture_start_sample.value());
 
 				if (time_domain() != Temporal::AudioTime) {
 					start = timepos_t (start.beats());
@@ -1074,7 +1072,7 @@ DiskWriter::do_flush (RunContext ctxt, bool force_flush)
 }
 
 void
-DiskWriter::reset_write_sources (bool mark_write_complete, bool /*force*/)
+DiskWriter::reset_write_sources (bool mark_write_complete)
 {
 	std::shared_ptr<ChannelList const> c = channels.reader();
 	uint32_t n = 0;
@@ -1087,13 +1085,17 @@ DiskWriter::reset_write_sources (bool mark_write_complete, bool /*force*/)
 
 	for (auto const chan : *c) {
 
-		if (chan->write_source) {
+		if (mark_write_complete) {
+			Source::WriterLock lock(chan->write_source->mutex());
+			/* we're iterating over channels, so we know this is an
+			   audio source and the duration argument makes no
+			   difference
+			*/
+			chan->write_source->mark_streaming_write_completed (lock, timecnt_t());
+			chan->write_source->done_with_peakfile_writes ();
+		}
 
-			if (mark_write_complete) {
-				Source::WriterLock lock(chan->write_source->mutex());
-				chan->write_source->mark_streaming_write_completed (lock);
-				chan->write_source->done_with_peakfile_writes ();
-			}
+		if (chan->write_source) {
 
 			if (chan->write_source->removable()) {
 				chan->write_source->mark_for_remove ();
@@ -1107,13 +1109,6 @@ DiskWriter::reset_write_sources (bool mark_write_complete, bool /*force*/)
 
 		if (record_enabled()) {
 			capturing_sources.push_back (chan->write_source);
-		}
-	}
-
-	if (_midi_write_source) {
-		if (mark_write_complete) {
-			Source::WriterLock lm(_midi_write_source->mutex());
-			_midi_write_source->mark_streaming_write_completed (lm);
 		}
 	}
 
@@ -1317,7 +1312,11 @@ DiskWriter::transport_stopped_wallclock (struct tm& when, time_t twhen, bool abo
 			total_capture += timecnt_t ((*ci)->samples);
 		}
 
-		_midi_write_source->mark_midi_streaming_write_completed (source_lock, Evoral::Sequence<Temporal::Beats>::ResolveStuckNotes, total_capture.beats());
+		/* XXX we need to consider snapping the duration up to the next
+		 * beat/bar here
+		 */
+
+		_midi_write_source->mark_midi_streaming_write_completed (source_lock, Evoral::Sequence<Temporal::Beats>::ResolveStuckNotes, total_capture);
 	}
 
 	_last_capture_sources.insert (_last_capture_sources.end(), audio_srcs.begin(), audio_srcs.end());
@@ -1386,8 +1385,9 @@ DiskWriter::adjust_buffering ()
 {
 	std::shared_ptr<ChannelList const> c = channels.reader();
 
+	samplecnt_t bufsz = std::max<samplecnt_t> (_chunk_samples * 2, _session.butler()->audio_capture_buffer_size());
 	for (auto const chan : *c) {
-		chan->resize (_session.butler()->audio_capture_buffer_size());
+		chan->resize (bufsz);
 	}
 }
 
@@ -1442,6 +1442,7 @@ bool
 DiskWriter::configure_io (ChanCount in, ChanCount out)
 {
 	bool changed = false;
+
 	{
 		std::shared_ptr<ChannelList const> c = channels.reader();
 		if (in.n_audio() != c->size()) {
@@ -1458,7 +1459,7 @@ DiskWriter::configure_io (ChanCount in, ChanCount out)
 	}
 
 	if (record_enabled() || changed) {
-		reset_write_sources (false, true);
+		reset_write_sources (false);
 	}
 
 	return true;
@@ -1473,7 +1474,7 @@ DiskWriter::use_playlist (DataType dt, std::shared_ptr<Playlist> playlist)
 		return -1;
 	}
 	if (reset_ws) {
-		reset_write_sources (false, true);
+		reset_write_sources (false);
 	}
 	return 0;
 }

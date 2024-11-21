@@ -17,8 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __slot_properties_box_h__
-#define __slot_properties_box_h__
+#pragma once
 
 #include <map>
 
@@ -47,6 +46,7 @@ namespace ARDOUR {
 class TriggerPropertiesBox;
 class RegionPropertiesBox;
 class RegionOperationsBox;
+class MidiCueEditor;
 class ClipEditorBox;
 
 class SlotPropertyTable : public TriggerUI, public Gtk::Table
@@ -166,19 +166,3 @@ private:
 
 	SlotPropertyWidget* _triggerwidget;
 };
-
-/* XXX probably for testing only */
-
-class SlotPropertyWindow : public Gtk::Window
-{
-    public:
-	SlotPropertyWindow (ARDOUR::TriggerReference);
-
-	bool on_key_press_event (GdkEventKey*);
-	bool on_key_release_event (GdkEventKey*);
-
-	TriggerPropertiesBox *_trig_box;
-	RegionOperationsBox *_ops_box;
-	ClipEditorBox *_trim_box;
-};
-#endif /* __multi_region_properties_box_h__ */

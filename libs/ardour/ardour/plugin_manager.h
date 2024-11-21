@@ -21,8 +21,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_plugin_manager_h__
-#define __ardour_plugin_manager_h__
+#pragma once
 
 #ifdef WAF_BUILD
 #include "libardour-config.h"
@@ -32,7 +31,6 @@
 #include <map>
 #include <string>
 #include <set>
-#include <boost/container/set.hpp>
 
 #include "ardour/libardour_visibility.h"
 #include "ardour/types.h"
@@ -65,13 +63,15 @@ struct AUv2DescStr;
 #endif
 
 
-class LIBARDOUR_API PluginManager : public boost::noncopyable {
+class LIBARDOUR_API PluginManager {
 public:
 	static PluginManager& instance();
 	static std::string auv2_scanner_bin_path;
 	static std::string vst2_scanner_bin_path;
 	static std::string vst3_scanner_bin_path;
 
+	PluginManager (const PluginManager&) = delete;
+	PluginManager& operator= (const PluginManager&) = delete;
 	~PluginManager ();
 
 	const ARDOUR::PluginInfoList& windows_vst_plugin_info ();
@@ -169,19 +169,19 @@ public:
 	/** plugins were added to or removed from one of the PluginInfoLists
 	 * This implies PluginScanLogChanged.
 	 */
-	PBD::Signal0<void> PluginListChanged;
+	PBD::Signal<void()> PluginListChanged;
 
 	/** Plugin Statistics (use-count, recently-used) changed */
-	PBD::Signal0<void> PluginStatsChanged;
+	PBD::Signal<void()> PluginStatsChanged;
 
 	/** Plugin ScanLog changed */
-	PBD::Signal0<void> PluginScanLogChanged;
+	PBD::Signal<void()> PluginScanLogChanged;
 
 	/** A single plugin's Hidden/Favorite status changed */
-	PBD::Signal3<void, ARDOUR::PluginType, std::string, PluginStatusType> PluginStatusChanged; //PluginType t, string id, string tag
+	PBD::Signal<void(ARDOUR::PluginType, std::string, PluginStatusType)> PluginStatusChanged; //PluginType t, string id, string tag
 
 	/** A single plugin's Tags status changed */
-	PBD::Signal3<void, ARDOUR::PluginType, std::string, std::string> PluginTagChanged; //PluginType t, string id, string tag
+	PBD::Signal<void(ARDOUR::PluginType, std::string, std::string)> PluginTagChanged; //PluginType t, string id, string tag
 
 private:
 	typedef std::shared_ptr<PluginScanLogEntry> PSLEPtr;
@@ -192,7 +192,7 @@ private:
 		}
 	};
 
-	typedef boost::container::set<PSLEPtr, PSLEPtrSort> PluginScanLog;
+	typedef std::set<PSLEPtr, PSLEPtrSort> PluginScanLog;
 	PluginScanLog _plugin_scan_log;
 
 	PSLEPtr scan_log_entry (PluginType const type, std::string const& path) {
@@ -372,5 +372,4 @@ private:
 
 } /* namespace ARDOUR */
 
-#endif /* __ardour_plugin_manager_h__ */
 

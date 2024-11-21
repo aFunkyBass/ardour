@@ -23,7 +23,7 @@
 #include <set>
 #include <vector>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <glibmm/threads.h>
 
 #include "pbd/search_path.h"
@@ -100,7 +100,7 @@ public:
 	IPlugView* view ();
 	void       close_view ();
 	void       update_contoller_param ();
-	PBD::Signal2<void, int, int> OnResizeView;
+	PBD::Signal<void(int, int)> OnResizeView;
 
 	tresult PLUGIN_API queryInterface (const TUID _iid, void** obj) SMTG_OVERRIDE;
 	uint32  PLUGIN_API addRef () SMTG_OVERRIDE { return 1; }
@@ -178,7 +178,7 @@ public:
 	                       ParamValueChanged
 	                     };
 
-	PBD::Signal3<void, ParameterChange, uint32_t, float> OnParameterChange;
+	PBD::Signal<void(ParameterChange, uint32_t, float)> OnParameterChange;
 
 	/* API for Ardour -- Setup/Processing */
 	uint32_t plugin_latency ();
@@ -328,8 +328,8 @@ private:
 	std::set<Evoral::Parameter> _ac_subscriptions;
 	bool                        _add_to_selection;
 
-	boost::optional<uint32_t> _plugin_latency;
-	boost::optional<uint32_t> _plugin_tail;
+	std::optional<uint32_t> _plugin_latency;
+	std::optional<uint32_t> _plugin_tail;
 
 	int _n_bus_in;
 	int _n_bus_out;
@@ -359,6 +359,10 @@ private:
 	bool _no_kMono;
 	/* work around yabridge threading */
 	bool _restart_component_is_synced;
+	/* work around PSL calls during set_owner,
+	 * while the route holds a processor lock
+	 */
+	std::atomic<bool> _in_set_owner;
 };
 
 } // namespace Steinberg
@@ -440,7 +444,7 @@ public:
 	void                  close_view ();
 	void                  update_contoller_param ();
 
-	PBD::Signal2<void, int, int> OnResizeView;
+	PBD::Signal<void(int, int)> OnResizeView;
 
 private:
 	samplecnt_t plugin_latency () const;
@@ -482,7 +486,7 @@ public:
 	bool                              is_instrument () const;
 	PBD::Searchpath                   preset_search_path () const;
 
-	boost::optional<bool>             has_editor;
+	std::optional<bool>             has_editor;
 
 	std::shared_ptr<VST3PluginModule> m;
 };

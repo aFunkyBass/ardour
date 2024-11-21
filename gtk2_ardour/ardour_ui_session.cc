@@ -47,6 +47,7 @@
 
 #include "gtkmm2ext/application.h"
 #include "gtkmm2ext/doi.h"
+#include "gtkmm2ext/utils.h"
 
 #include "widgets/prompter.h"
 
@@ -676,7 +677,7 @@ ARDOUR_UI::build_session (const std::string& path, const std::string& snap_name,
 	audio_midi_setup->set_position (WIN_POS_CENTER);
 	audio_midi_setup->set_modal ();
 	audio_midi_setup->present ();
-	_engine_dialog_connection = audio_midi_setup->signal_response().connect (boost::bind (&ARDOUR_UI::audio_midi_setup_for_new_session_done, this, _1, path, snap_name, session_template, bus_profile, unnamed, domain));
+	_engine_dialog_connection = audio_midi_setup->signal_response().connect (std::bind (&ARDOUR_UI::audio_midi_setup_for_new_session_done, this, _1, path, snap_name, session_template, bus_profile, unnamed, domain));
 
 	/* not done yet, but we're avoiding modal dialogs */
 	return 0;
@@ -1064,7 +1065,7 @@ If you still wish to proceed, please use the\n\n\
 		 * copied so far, and the total number to copy.
 		 */
 
-		sa.Progress.connect_same_thread (c, boost::bind (&ARDOUR_UI::save_as_progress_update, this, _1, _2, _3, label, progress_bar));
+		sa.Progress.connect_same_thread (c, std::bind (&ARDOUR_UI::save_as_progress_update, this, _1, _2, _3, label, progress_bar));
 
 		progress_dialog.show_all ();
 		progress_dialog.present ();
@@ -1133,6 +1134,12 @@ ARDOUR_UI::process_snapshot_session_prompter (Prompter& prompter, bool switch_to
 	prompter.get_result (snapname);
 
 	bool do_save = (snapname.length() != 0);
+
+	if (do_save && snapname == _session->snap_name ()) {
+		ArdourMessageDialog msg (_("The currently loaded session name cannot be used as new snapshot.\nJust save the session for this operation."));
+		msg.run ();
+		return false;
+	}
 
 	if (do_save) {
 		std::string const& illegal = Session::session_name_is_legal (snapname);

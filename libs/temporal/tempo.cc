@@ -49,7 +49,7 @@ std::string Meter::xml_node_name = X_("Meter");
 
 SerializedRCUManager<TempoMap> TempoMap::_map_mgr (0);
 thread_local TempoMap::SharedPtr TempoMap::_tempo_map_p;
-PBD::Signal0<void> TempoMap::MapChanged;
+PBD::Signal<void()> TempoMap::MapChanged;
 
 #ifndef NDEBUG
 #define TEMPO_MAP_ASSERT(expr) TempoMap::map_assert(expr, #expr, __FILE__, __LINE__)
@@ -357,6 +357,17 @@ Meter::round_to_bar (Temporal::BBT_Time const & bbt) const
 	}
 
 	return BBT_Time (bbt.bars, 1, 0);
+}
+
+Temporal::BBT_Time
+Meter::round_up_to_bar (Temporal::BBT_Time const & bbt) const
+{
+	if (bbt.beats == 1 && bbt.ticks == 0) {
+		/* on bar, do not round up */
+		return bbt;
+	}
+
+	return BBT_Time (bbt.bars+1, 1, 0);
 }
 
 Temporal::BBT_Time

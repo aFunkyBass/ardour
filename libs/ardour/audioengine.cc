@@ -463,7 +463,12 @@ AudioEngine::process_callback (pframes_t nframes)
 			/* fade out done */
 			PortManager::silence_outputs (nframes);
 			session_deleted = true;
+#ifdef TRACE_SETSESSION_NULL
+			_session_connections.drop_connections ();
+			_session = 0;
+#else
 			SessionHandlePtr::set_session (0);
+#endif
 			session_removal_countdown = -1; // reset to "not in progress"
 			session_remove_pending = false;
 			session_removed.signal(); // wakes up thread that initiated session removal
@@ -678,7 +683,6 @@ void
 AudioEngine::do_reset_backend()
 {
 	SessionEvent::create_per_thread_pool (X_("Backend reset processing thread"), 1024);
-	pthread_set_name ("EngineWatchdog");
 
 	Glib::Threads::Mutex::Lock guard (_reset_request_lock);
 
@@ -739,7 +743,6 @@ void
 AudioEngine::do_devicelist_update()
 {
 	SessionEvent::create_per_thread_pool (X_("Device list update processing thread"), 512);
-	pthread_set_name ("DeviceList");
 
 	Glib::Threads::Mutex::Lock guard (_devicelist_update_lock);
 
@@ -769,13 +772,13 @@ AudioEngine::start_hw_event_processing()
 	if (_hw_reset_event_thread == 0) {
 		_hw_reset_request_count.store (0);
 		_stop_hw_reset_processing.store (0);
-		_hw_reset_event_thread = PBD::Thread::create (boost::bind (&AudioEngine::do_reset_backend, this));
+		_hw_reset_event_thread = PBD::Thread::create (std::bind (&AudioEngine::do_reset_backend, this), "EngineWatchdog");
 	}
 
 	if (_hw_devicelist_update_thread == 0) {
 		_hw_devicelist_update_count.store (0);
 		_stop_hw_devicelist_processing.store (0);
-		_hw_devicelist_update_thread = PBD::Thread::create (boost::bind (&AudioEngine::do_devicelist_update, this));
+		_hw_devicelist_update_thread = PBD::Thread::create (std::bind (&AudioEngine::do_devicelist_update, this), "DeviceList");
 	}
 }
 
@@ -1069,6 +1072,12 @@ AudioEngine::start (bool for_latency)
 		return -1;
 	}
 
+	if (_backend->is_realtime ()) {
+		pbd_set_engine_rt_priority (_backend->client_real_time_priority ());
+	} else {
+		pbd_set_engine_rt_priority (0);
+	}
+
 	_running = true;
 
 	if (_session) {
@@ -1192,38 +1201,6 @@ AudioEngine::get_dsp_load() const
 	return _backend->dsp_load ();
 }
 
-bool
-AudioEngine::is_realtime() const
-{
-	if (!_backend) {
-		return false;
-	}
-
-	return _backend->is_realtime();
-}
-
-int
-AudioEngine::client_real_time_priority ()
-{
-	if (!_backend) {
-		assert (0);
-		return PBD_RT_PRI_PROC;
-	}
-	if (!_backend->is_realtime ()) {
-		/* this is only an issue with the Dummy backend.
-		 * - with JACK, we require rt permissions.
-		 * - with ALSA/PulseAudio this can only happen if rt permissions
-		 *   are n/a. Other attempts to get rt will fail likewise.
-		 *
-		 * perhaps:
-		 * TODO: use is_realtime () ? PBD_SCHED_FIFO : PBD_SCHED_OTHER
-		 */
-		return PBD_RT_PRI_PROC; // XXX
-	}
-
-	return _backend->client_real_time_priority();
-}
-
 void
 AudioEngine::transport_start ()
 {
@@ -1345,7 +1322,7 @@ AudioEngine::get_sync_offset (pframes_t& offset) const
 }
 
 int
-AudioEngine::create_process_thread (boost::function<void()> func)
+AudioEngine::create_process_thread (std::function<void()> func)
 {
 	if (!_backend) {
 		return -1;

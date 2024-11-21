@@ -22,8 +22,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_mixer_ui_h__
-#define __ardour_mixer_ui_h__
+#pragma once
 
 #include <list>
 
@@ -56,6 +55,7 @@
 #include "widgets/tabbable.h"
 #include "widgets/ardour_dropdown.h"
 
+#include "application_bar.h"
 #include "axis_provider.h"
 #include "enums.h"
 #include "monitor_section.h"
@@ -144,11 +144,14 @@ public:
 
 	void register_actions ();
 
+	void focus_on_clock();
+
 	void load_bindings ();
 	Gtkmm2ext::Bindings*  bindings;
 
 	void toggle_mixer_list ();
-	void showhide_mixer_list (bool yn);
+	void toggle_mixer_strip ();
+	void toggle_mixer_props ();
 
 	void toggle_surround_master ();
 
@@ -177,7 +180,7 @@ protected:
 private:
 	Mixer_UI ();
 	static Mixer_UI*     _instance;
-	Gtk::VBox            _content;
+
 	Gtk::HBox             global_hpacker;
 	Gtk::VBox             global_vpacker;
 	Gtk::ScrolledWindow   scroller;
@@ -210,7 +213,6 @@ private:
 	Gtk::Label            vca_label;
 	Gtk::EventBox         vca_scroller_base;
 	Gtk::HBox             out_packer;
-	ArdourWidgets::HPane  list_hpane;
 
 	Gtk::EventBox         _mixer_scene_spacer;
 	Gtk::Frame            _mixer_scene_frame;
@@ -334,6 +336,8 @@ private:
 	Gtk::Menu *track_menu;
 	void track_column_click (gint);
 	void build_track_menu ();
+
+	ApplicationBar _application_bar;
 
 	MonitorSection   _monitor_section;
 	PluginSelector* _plugin_selector;
@@ -494,4 +498,3 @@ private:
 	void ab_plugins ();
 };
 
-#endif /* __ardour_mixer_ui_h__ */

@@ -96,14 +96,14 @@ EditorSections::set_session (Session* s)
 	SessionHandlePtr::set_session (s);
 
 	if (_session) {
-		_session->locations ()->added.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::location_changed, this, _1), gui_context ());
-		_session->locations ()->removed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::location_changed, this, _1), gui_context ());
-		_session->locations ()->changed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::queue_redisplay, this), gui_context ());
+		_session->locations ()->added.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::location_changed, this, _1), gui_context ());
+		_session->locations ()->removed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::location_changed, this, _1), gui_context ());
+		_session->locations ()->changed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::queue_redisplay, this), gui_context ());
 
-		Location::start_changed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::location_changed, this, _1), gui_context ());
-		Location::end_changed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::location_changed, this, _1), gui_context ());
-		Location::flags_changed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::queue_redisplay, this), gui_context ());
-		Location::name_changed.connect (_session_connections, invalidator (*this), boost::bind (&EditorSections::location_changed, this, _1), gui_context ());
+		Location::start_changed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::location_changed, this, _1), gui_context ());
+		Location::end_changed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::location_changed, this, _1), gui_context ());
+		Location::flags_changed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::queue_redisplay, this), gui_context ());
+		Location::name_changed.connect (_session_connections, invalidator (*this), std::bind (&EditorSections::location_changed, this, _1), gui_context ());
 	}
 
 	redisplay ();
@@ -284,13 +284,13 @@ EditorSections::selection_changed ()
 			/* OK */
 			break;
 		case Editing::MouseObject:
-			if (ActionManager::get_toggle_action ("MouseMode", "set-mouse-mode-object-range")->get_active ()) {
+			if (ActionManager::get_toggle_action (PublicEditor::instance().editor_name().c_str(), "set-mouse-mode-object-range")->get_active ()) {
 				/* smart mode; OK */
 				break;
 			}
 			/*fallthrough*/
 		default:
-			Glib::RefPtr<RadioAction> ract = ActionManager::get_radio_action (X_("MouseMode"), X_("set-mouse-mode-range"));
+			Glib::RefPtr<RadioAction> ract = ActionManager::get_radio_action (PublicEditor::instance().editor_name().c_str(), X_("set-mouse-mode-range"));
 			ract->set_active (true);
 			break;
 	}

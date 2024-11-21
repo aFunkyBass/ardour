@@ -19,8 +19,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_automatable_h__
-#define __ardour_automatable_h__
+#pragma once
 
 #include <map>
 #include <memory>
@@ -117,7 +116,7 @@ public:
 	int set_automation_xml_state (const XMLNode&, Evoral::Parameter default_param);
 	XMLNode& get_automation_xml_state() const;
 
-	PBD::Signal0<void> AutomationStateChanged;
+	PBD::Signal<void()> AutomationStateChanged;
 
 	void start_domain_bounce (Temporal::DomainBounceInfo&);
 	void finish_domain_bounce (Temporal::DomainBounceInfo&);
@@ -149,4 +148,3 @@ private:
 
 } // namespace ARDOUR
 
-#endif /* __ardour_automatable_h__ */

@@ -29,8 +29,6 @@
 #include <memory>
 #include <set>
 
-#include <boost/scoped_array.hpp>
-
 #include <glibmm/fileutils.h>
 #include <glibmm/threads.h>
 
@@ -234,9 +232,9 @@ AudioRegion::register_properties ()
 	, _fade_before_fx (Properties::fade_before_fx, other->_fade_before_fx) \
 	, _scale_amplitude (Properties::scale_amplitude, other->_scale_amplitude) \
 	, _fade_in (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_fade_in.val()))) \
-	, _inverse_fade_in (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_inverse_fade_in.val()))) \
-	, _fade_out (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_fade_out.val()))) \
-	, _inverse_fade_out (Properties::fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_inverse_fade_out.val())))
+	, _inverse_fade_in (Properties::inverse_fade_in, std::shared_ptr<AutomationList> (new AutomationList (*other->_inverse_fade_in.val()))) \
+	, _fade_out (Properties::fade_out, std::shared_ptr<AutomationList> (new AutomationList (*other->_fade_out.val()))) \
+	, _inverse_fade_out (Properties::inverse_fade_out, std::shared_ptr<AutomationList> (new AutomationList (*other->_inverse_fade_out.val())))
 /* a Session will reset these to its chosen defaults by calling AudioRegion::set_default_fade() */
 
 void
@@ -272,6 +270,7 @@ AudioRegion::send_change (const PropertyChange& what_changed)
 	our_interests.add (Properties::envelope);
 	our_interests.add (Properties::fade_in);
 	our_interests.add (Properties::fade_out);
+	our_interests.add (Properties::start);
 
 	if (what_changed.contains (our_interests)) {
 		_invalidated.exchange (true);
@@ -468,7 +467,7 @@ void
 AudioRegion::connect_to_analysis_changed ()
 {
 	for (SourceList::const_iterator i = _sources.begin(); i != _sources.end(); ++i) {
-		(*i)->AnalysisChanged.connect_same_thread (*this, boost::bind (&AudioRegion::maybe_invalidate_transients, this));
+		(*i)->AnalysisChanged.connect_same_thread (*this, std::bind (&AudioRegion::maybe_invalidate_transients, this));
 	}
 }
 
@@ -486,7 +485,7 @@ AudioRegion::connect_to_header_position_offset_changed ()
 			unique_srcs.insert (*i);
 			std::shared_ptr<AudioFileSource> afs = std::dynamic_pointer_cast<AudioFileSource> (*i);
 			if (afs) {
-				afs->HeaderPositionOffsetChanged.connect_same_thread (*this, boost::bind (&AudioRegion::source_offset_changed, this));
+				afs->HeaderPositionOffsetChanged.connect_same_thread (*this, std::bind (&AudioRegion::source_offset_changed, this));
 			}
 		}
 	}
@@ -495,9 +494,9 @@ AudioRegion::connect_to_header_position_offset_changed ()
 void
 AudioRegion::listen_to_my_curves ()
 {
-	_envelope->StateChanged.connect_same_thread (*this, boost::bind (&AudioRegion::envelope_changed, this));
-	_fade_in->StateChanged.connect_same_thread (*this, boost::bind (&AudioRegion::fade_in_changed, this));
-	_fade_out->StateChanged.connect_same_thread (*this, boost::bind (&AudioRegion::fade_out_changed, this));
+	_envelope->StateChanged.connect_same_thread (*this, std::bind (&AudioRegion::envelope_changed, this));
+	_fade_in->StateChanged.connect_same_thread (*this, std::bind (&AudioRegion::fade_in_changed, this));
+	_fade_out->StateChanged.connect_same_thread (*this, std::bind (&AudioRegion::fade_out_changed, this));
 }
 
 void
@@ -730,10 +729,11 @@ AudioRegion::read_at (Sample*     buf,
 		_cache_tail  = 0;
 	}
 
-	boost::scoped_array<gain_t> gain_array;
-	boost::scoped_array<Sample> mixdown_array;
+	std::unique_ptr<gain_t[]> gain_array;
+	std::unique_ptr<Sample[]> mixdown_array;
 
-	// TODO optimize mono reader, w/o plugins -> old code
+	bool nofx = false; // apply region fades at the end
+
 	if (n_chn > 1 && _cache_start < _cache_end && internal_offset + suffix >= _cache_start && internal_offset + suffix + can_read <= _cache_end) {
 		DEBUG_TRACE (DEBUG::AudioPlayback, string_compose ("Region '%1' channel: %2 copy from cache %3 - %4 to_read: %5 can_read: %6\n",
 		             name(), chan_n, internal_offset + suffix, internal_offset + suffix + can_read, to_read, can_read));
@@ -746,10 +746,38 @@ AudioRegion::read_at (Sample*     buf,
 		lm.release ();
 
 		samplecnt_t    n_read = to_read; //< data to read from disk
-		samplecnt_t    n_proc = to_read; //< silence pad data to process
-		samplepos_t    n_tail = 0; // further silence pad, read tail from FX
-		samplepos_t    readat = pos;
 		sampleoffset_t offset = internal_offset;
+
+		/* don't use cache when there are no region FX */
+		if (!have_fx) {
+			cl.release ();
+			if (read_from_sources (_sources, lsamples, mixdown_buffer, pos, n_read, chan_n) != to_read) {
+				return 0;
+			}
+
+			/* APPLY REGULAR GAIN CURVES AND SCALING TO mixdown_buffer */
+			if (envelope_active())  {
+				_envelope->curve().get_vector (timepos_t (offset), timepos_t (offset + n_read), gain_buffer, n_read);
+
+				if (_scale_amplitude != 1.0f) {
+					for (samplecnt_t n = 0; n < n_read; ++n) {
+						mixdown_buffer[n] *= gain_buffer[n] * _scale_amplitude;
+					}
+				} else {
+					for (samplecnt_t n = 0; n < n_read; ++n) {
+						mixdown_buffer[n] *= gain_buffer[n];
+					}
+				}
+			} else if (_scale_amplitude != 1.0f) {
+				apply_gain_to_buffer (mixdown_buffer, n_read, _scale_amplitude);
+			}
+			nofx = true;
+			goto endread;
+		}
+
+		samplecnt_t n_proc = to_read; //< silence pad data to process
+		samplepos_t n_tail = 0; // further silence pad, read tail from FX
+		samplepos_t readat = pos;
 
 		if (tsamples > 0 && cnt >= esamples) {
 			n_tail = can_read - n_read;
@@ -799,7 +827,7 @@ AudioRegion::read_at (Sample*     buf,
 			 */
 
 			if (read_from_sources (_sources, lsamples, mixdown_buffer, readat, n_read, chn) != n_read) {
-				return 0; // XXX
+				return 0;
 			}
 
 			/* APPLY REGULAR GAIN CURVES AND SCALING TO mixdown_buffer */
@@ -907,6 +935,7 @@ AudioRegion::read_at (Sample*     buf,
 		_cache_tail  = n_tail;
 		cl.release ();
 	}
+endread:
 
 	/* APPLY FADES TO THE DATA IN mixdown_buffer AND MIX THE RESULTS INTO
 	 * buf. The key things to realize here: (1) the fade being applied is
@@ -953,7 +982,7 @@ AudioRegion::read_at (Sample*     buf,
 			_fade_in->curve().get_vector (timepos_t (internal_offset), timepos_t (internal_offset + fade_in_limit), gain_buffer, fade_in_limit);
 		}
 
-		if (!_fade_before_fx) {
+		if (!_fade_before_fx || nofx) {
 			/* Mix our newly-read data in, with the fade */
 			for (samplecnt_t n = 0; n < fade_in_limit; ++n) {
 				buf[n] += mixdown_buffer[n] * gain_buffer[n];
@@ -998,7 +1027,7 @@ AudioRegion::read_at (Sample*     buf,
 			_fade_out->curve().get_vector (timepos_t (curve_offset), timepos_t (curve_offset + fade_out_limit), gain_buffer, fade_out_limit);
 		}
 
-		if (!_fade_before_fx) {
+		if (!_fade_before_fx || nofx) {
 			/* Mix our newly-read data with whatever was already there, with the fade out applied to our data.  */
 			for (samplecnt_t n = 0, m = fade_out_offset; n < fade_out_limit; ++n, ++m) {
 				buf[m] += mixdown_buffer[m] * gain_buffer[n];
@@ -1021,11 +1050,14 @@ AudioRegion::read_at (Sample*     buf,
 			mix_buffers_no_gain (buf + fade_in_limit, mixdown_buffer + fade_in_limit, N);
 		}
 	}
+
 	samplecnt_t T = _cache_tail;
 	if (T > 0) {
 		T = min (T, can_read);
-			DEBUG_TRACE (DEBUG::AudioPlayback, string_compose ("Region %1 adding FX tail of %2 cut to_read %3 at %4 total len = %5 cnt was %6\n",
-			             name (), _cache_tail, T, to_read, to_read + T, cnt));
+		DEBUG_TRACE (DEBUG::AudioPlayback, string_compose ("Region %1 adding FX tail of %2 cut to_read %3 at %4 total len = %5 cnt was %6\n",
+		                                                   name (), _cache_tail, T, to_read, to_read + T, cnt));
+		/* limit (to_read + T) == cnt, some cases (e.g. loop) will ignore tail data */
+		T = min (T, cnt - to_read);
 		/* AudioPlaylist::read reads regions in reverse order, so we can add the tail here */
 		mix_buffers_no_gain (buf + to_read, mixdown_buffer + to_read, T);
 	}
@@ -2224,9 +2256,9 @@ AudioRegion::get_transients (AnalysisFeatureList& results)
 AudioIntervalResult
 AudioRegion::find_silence (Sample threshold, samplecnt_t min_length, samplecnt_t fade_length, InterThreadInfo& itt) const
 {
-	samplecnt_t const block_size = 64 * 1024;
-	boost::scoped_array<Sample> loudest (new Sample[block_size]);
-	boost::scoped_array<Sample> buf (new Sample[block_size]);
+	constexpr samplecnt_t block_size = 64 * 1024;
+	std::unique_ptr<Sample[]> loudest (new Sample[block_size]);
+	std::unique_ptr<Sample[]> buf (new Sample[block_size]);
 
 	assert (fade_length >= 0);
 	assert (min_length > 0);
@@ -2484,7 +2516,7 @@ AudioRegion::_add_plugin (std::shared_ptr<RegionFxPlugin> rfx, std::shared_ptr<R
 						if (SessionEvent::has_per_thread_pool ()) {
 							send_change (PropertyChange (Properties::region_fx)); // trigger DiskReader overwrite
 						} else {
-							_session.butler ()->delegate (boost::bind (&AudioRegion::send_change, this, PropertyChange (Properties::region_fx)));
+							_session.butler ()->delegate (std::bind (&AudioRegion::send_change, this, PropertyChange (Properties::region_fx)));
 						}
 					}
 				});
@@ -2499,8 +2531,8 @@ AudioRegion::_add_plugin (std::shared_ptr<RegionFxPlugin> rfx, std::shared_ptr<R
 				});
 	}
 
-	rfx->LatencyChanged.connect_same_thread (*this, boost::bind (&AudioRegion::fx_latency_changed, this, false));
-	rfx->TailTimeChanged.connect_same_thread (*this, boost::bind (&AudioRegion::fx_tail_changed, this, false));
+	rfx->LatencyChanged.connect_same_thread (*this, std::bind (&AudioRegion::fx_latency_changed, this, false));
+	rfx->TailTimeChanged.connect_same_thread (*this, std::bind (&AudioRegion::fx_tail_changed, this, false));
 	rfx->set_block_size (_session.get_block_size ());
 
 	if (from_set_state) {
@@ -2537,6 +2569,13 @@ AudioRegion::remove_plugin (std::shared_ptr<RegionFxPlugin> fx)
 		return false;
 	}
 	_plugins.erase (i);
+
+	if (_plugins.empty ()) {
+		Glib::Threads::Mutex::Lock cl (_cache_lock);
+		_cache_start = _cache_end = -1;
+		_cache_tail  = 0;
+		_readcache.clear ();
+	}
 
 	lm.release ();
 

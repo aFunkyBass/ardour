@@ -18,8 +18,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __libardour_audiobackend_h__
-#define __libardour_audiobackend_h__
+#pragma once
 
 #include <string>
 #include <vector>
@@ -27,7 +26,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include <boost/function.hpp>
 
 #include "ardour/audioengine.h"
 #include "ardour/libardour_visibility.h"
@@ -164,7 +162,7 @@ public:
 	/** Return true if the backed is JACK */
 	virtual bool is_jack () const { return false; }
 
-	virtual int client_real_time_priority () { return PBD_RT_PRI_PROC; }
+	virtual int client_real_time_priority () { return 0; }
 
 	/* Discovering devices and parameters */
 
@@ -785,7 +783,7 @@ public:
 	 *
 	 * @param func process function to run
 	 */
-	virtual int create_process_thread (boost::function<void()> func) = 0;
+	virtual int create_process_thread (std::function<void()> func) = 0;
 
 	/** Wait for all processing threads to exit.
 	 *
@@ -841,4 +839,3 @@ protected:
 
 } // namespace ARDOUR
 
-#endif /* __libardour_audiobackend_h__ */

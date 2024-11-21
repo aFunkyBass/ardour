@@ -19,8 +19,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __libardour_stripable_h__
-#define __libardour_stripable_h__
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -103,7 +102,7 @@ class LIBARDOUR_API Stripable : public SessionObject,
 
 	/* gui's call this for their own purposes. */
 
-	PBD::Signal2<void,std::string,void*> gui_changed;
+	PBD::Signal<void(std::string,void*)> gui_changed;
 
 	/* *************************************************************
 	 * Pure interface begins here
@@ -149,7 +148,7 @@ class LIBARDOUR_API Stripable : public SessionObject,
 	/* ACs mapped to any control have changed. API user is to drop references,
 	 * and query mapped ctrl again
 	 */
-	PBD::Signal0<void> MappedControlsChanged;
+	PBD::Signal<void()> MappedControlsChanged;
 
 	/* "well-known" controls for sends to well-known busses in this route. Any or all may
 	 * be null.
@@ -158,7 +157,7 @@ class LIBARDOUR_API Stripable : public SessionObject,
 	 * In Ardour, these are user-created sends that connect to user-created
 	 * Aux busses.
 	 */
-	virtual std::shared_ptr<AutomationControl> send_level_controllable (uint32_t n) const = 0;
+	virtual std::shared_ptr<AutomationControl> send_level_controllable (uint32_t n, bool locked = false) const = 0;
 	virtual std::shared_ptr<AutomationControl> send_enable_controllable (uint32_t n) const = 0;
 	virtual std::shared_ptr<AutomationControl> send_pan_azimuth_controllable (uint32_t n) const = 0;
 	virtual std::shared_ptr<AutomationControl> send_pan_azimuth_enable_controllable (uint32_t n) const = 0;
@@ -192,4 +191,3 @@ class LIBARDOUR_API Stripable : public SessionObject,
 
 }
 
-#endif /* __libardour_stripable_h__ */

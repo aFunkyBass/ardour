@@ -18,10 +18,12 @@
  */
 
 #include <gtkmm/action.h>
+#include <gtkmm/frame.h>
 #include <gtkmm/notebook.h>
 #include <gtkmm/window.h>
 #include <gtkmm/stock.h>
 
+#include "gtkmm2ext/actions.h"
 #include "gtkmm2ext/gtk_ui.h"
 #include "gtkmm2ext/utils.h"
 #include "gtkmm2ext/visibility_tracker.h"
@@ -35,12 +37,18 @@ using namespace Gtk;
 using namespace Gtkmm2ext;
 using namespace ArdourWidgets;
 
-Tabbable::Tabbable (Widget& w, const string& visible_name, string const & nontranslatable_name, bool tabbed_by_default)
+Tabbable::Tabbable (const string& visible_name, string const & nontranslatable_name, Widget* w, bool tabbed_by_default, PaneLayout pl)
 	: WindowProxy (visible_name, nontranslatable_name)
-	, _contents (w)
 	, _parent_notebook (0)
 	, tab_requested_by_state (tabbed_by_default)
+	, _panelayout (pl)
 {
+	if (w) {
+		_contents = w;
+	} else {
+		_contents = &_content_vbox;
+		default_layout ();
+	}
 }
 
 Tabbable::~Tabbable ()
@@ -49,6 +57,99 @@ Tabbable::~Tabbable ()
 		delete _window;
 		_window = 0;
 	}
+}
+
+void
+Tabbable::default_layout ()
+{
+	left_attachment_button.set_text (_("Left"));
+	right_attachment_button.set_text (_("Right"));
+	bottom_attachment_button.set_text (_("Btm"));
+
+	left_attachment_button.set_icon (ArdourIcon::AttachmentLeft);
+	right_attachment_button.set_icon (ArdourIcon::AttachmentRight);
+	bottom_attachment_button.set_icon (ArdourIcon::AttachmentBottom);
+
+	left_attachment_button.set_name ("lock button"); // XXX re-use netural "fill active" bg style of "lock"
+	right_attachment_button.set_name ("lock button");  // TODO create dedicate button style
+	bottom_attachment_button.set_name ("lock button");
+
+	left_attachment_button.set_tweaks (ArdourButton::ExpandtoSquare);
+	right_attachment_button.set_tweaks (ArdourButton::ExpandtoSquare);
+	bottom_attachment_button.set_tweaks (ArdourButton::ExpandtoSquare);
+
+	left_attachment_button.set_sensitive (0 != (_panelayout & (PaneLeft | AttLeft)));
+	right_attachment_button.set_sensitive (0 != (_panelayout & PaneRight));
+	bottom_attachment_button.set_sensitive (0 != (_panelayout & (PaneBottom | AttBottom)));
+
+	content_attachment_hbox.set_border_width(3);
+	content_attachment_hbox.set_spacing(3);
+	content_attachment_hbox.pack_end (right_attachment_button, false, false);
+	content_attachment_hbox.pack_end (bottom_attachment_button, false, false);
+	content_attachment_hbox.pack_end (left_attachment_button, false, false);
+	content_attachments.add (content_attachment_hbox);
+
+	content_header_hbox.pack_start (content_app_bar, true, true);
+	content_header_hbox.pack_start (content_attachments, false, false);
+	content_header_hbox.pack_start (content_tabbables, false, false);
+
+	//wrap the header eboxen in a themeable frame
+	Gtk::Frame *toolbar_frame = manage(new Gtk::Frame);
+	toolbar_frame->set_name ("TransportFrame");
+	toolbar_frame->set_shadow_type (Gtk::SHADOW_NONE);
+	toolbar_frame->add (content_header_hbox);
+
+	_content_vbox.pack_start (*toolbar_frame, false, false);
+
+	Widget* midlevel = 0 == (_panelayout & PaneBottom) ? (Widget*)&content_midlevel_vbox : (Widget*)&content_midlevel_vpane;
+
+	if (_panelayout & PaneLeft) {
+		_content_vbox.pack_start (content_left_pane, true, true);
+		content_left_pane.add (content_att_left);
+		content_left_pane.add (*midlevel);
+	} else {
+		_content_vbox.pack_start (content_hbox, true, true);
+		content_hbox.pack_start (content_att_left, false, false);
+		content_hbox.pack_start (*midlevel, true, true);
+	}
+
+	if (_panelayout & PaneBottom) {
+		content_midlevel_vpane.add (content_right_pane);
+		content_midlevel_vpane.add (content_att_bottom);
+	} else {
+		content_midlevel_vbox.pack_start (content_right_pane, true, true);
+		content_midlevel_vbox.pack_start (content_att_bottom, false, false);
+	}
+
+	content_right_pane.add (content_inner_vbox);
+
+	if (_panelayout & PaneRight) {
+		content_right_pane.add (content_right_vbox);
+		content_right_vbox.pack_start (content_att_right, true, true);
+	}
+
+	content_inner_vbox.pack_start (content_main_top, false, false);
+	content_inner_vbox.pack_start (content_main, true, true);
+
+	if (_panelayout & PaneRight) {
+		content_right_pane.set_child_minsize (content_att_right, 160); /* rough guess at width of notebook tabs */
+	}
+	content_right_pane.set_check_divider_position (true);
+	content_right_pane.set_divider (0, 0.85);
+
+	if (_panelayout & PaneLeft) {
+		content_left_pane.set_child_minsize (content_att_left, 80);
+	}
+	content_left_pane.set_check_divider_position (true);
+	content_left_pane.set_divider (0, 0.15);
+
+	if (_panelayout & PaneBottom) {
+		content_midlevel_vpane.set_child_minsize (content_right_pane, 300);
+	}
+	content_midlevel_vpane.set_check_divider_position (true);
+	content_midlevel_vpane.set_divider (0, 0.85);
+
+	_content_vbox.show_all();
 }
 
 void
@@ -67,13 +168,13 @@ Tabbable::use_own_window (bool and_pack_it)
 	Gtk::Window* win = get (true);
 
 	if (and_pack_it) {
-		Gtk::Container* parent = _contents.get_parent();
+		Gtk::Container* parent = _contents->get_parent();
 		if (parent) {
-			_contents.hide ();
-			parent->remove (_contents);
+			_contents->hide ();
+			parent->remove (*_contents);
 		}
-		_own_notebook.append_page (_contents);
-		_contents.show ();
+		_own_notebook.append_page (*_contents);
+		_contents->show ();
 	}
 
 	return win;
@@ -127,7 +228,7 @@ Tabbable::get (bool create)
 void
 Tabbable::show_own_window (bool and_pack_it)
 {
-	Gtk::Widget* parent = _contents.get_parent();
+	Gtk::Widget* parent = _contents->get_parent();
 	Gtk::Allocation alloc;
 
 	if (parent) {
@@ -179,7 +280,7 @@ void
 Tabbable::change_visibility ()
 {
 	if (tabbed()) {
-		_parent_notebook->set_current_page (_parent_notebook->page_num (_contents));
+		_parent_notebook->set_current_page (_parent_notebook->page_num (*_contents));
 		return;
 	}
 
@@ -224,7 +325,6 @@ void
 Tabbable::detach ()
 {
 	show_own_window (true);
-	signal_tabbed_changed (false);
 }
 
 void
@@ -247,22 +347,20 @@ Tabbable::attach ()
 
 		save_pos_and_size ();
 
-		_contents.hide ();
-		_contents.get_parent()->remove (_contents);
+		_contents->hide ();
+		_contents->get_parent()->remove (*_contents);
 
 		/* leave the window around */
 
 		_window->hide ();
 	}
 
-	_parent_notebook->append_page (_contents);
-	_parent_notebook->set_tab_detachable (_contents);
-	_parent_notebook->set_tab_reorderable (_contents);
-	_parent_notebook->set_current_page (_parent_notebook->page_num (_contents));
+	_parent_notebook->append_page (*_contents);
+	_parent_notebook->set_tab_detachable (*_contents);
+	_parent_notebook->set_tab_reorderable (*_contents);
+	_parent_notebook->set_current_page (_parent_notebook->page_num (*_contents));
 
-	signal_tabbed_changed (true);
-
-	_contents.show ();
+	_contents->show ();
 
 	/* have to force this on, which is semantically correct, since
 	 * the user has effectively asked for it.
@@ -287,7 +385,7 @@ Tabbable::tabbed () const
 		return false;
 	}
 
-	if (_parent_notebook && (_parent_notebook->page_num (_contents) >= 0)) {
+	if (_parent_notebook && (_parent_notebook->page_num (*_contents) >= 0)) {
 		return true;
 	}
 
@@ -298,8 +396,8 @@ void
 Tabbable::hide_tab ()
 {
 	if (tabbed()) {
-		_contents.hide();
-		_parent_notebook->remove_page (_contents);
+		_contents->hide();
+		_parent_notebook->remove_page (*_contents);
 		StateChange (*this);
 	}
 }
@@ -308,12 +406,12 @@ void
 Tabbable::show_tab ()
 {
 	if (!window_visible() && _parent_notebook) {
-		if (_contents.get_parent() == 0) {
+		if (_contents->get_parent() == 0) {
 			tab_requested_by_state = true;
 			add_to_notebook (*_parent_notebook);
 		}
-		_parent_notebook->set_current_page (_parent_notebook->page_num (_contents));
-		_contents.show ();
+		_parent_notebook->set_current_page (_parent_notebook->page_num (*_contents));
+		_contents->show ();
 		current_toplevel()->present ();
 	}
 }
@@ -343,6 +441,16 @@ Tabbable::get_state() const
 
 	node.set_property (X_("tabbed"),  tabbed());
 
+	if (_panelayout & PaneRight) {
+		node.set_property (string_compose("%1%2", _menu_name, X_("-rightpane-pos")).c_str(), content_right_pane.get_divider ());
+	}
+	if (_panelayout & PaneLeft) {
+		node.set_property (string_compose("%1%2", _menu_name, X_("-leftpane-pos")).c_str(), content_left_pane.get_divider ());
+	}
+	if (_panelayout & PaneBottom) {
+		node.set_property (string_compose("%1%2", _menu_name, X_("-bottompane-pos")).c_str(), content_midlevel_vpane.get_divider ());
+	}
+
 	return node;
 }
 
@@ -357,7 +465,6 @@ Tabbable::set_state (const XMLNode& node, int version)
 
 	if (_visible) {
 		show_own_window (true);
-		signal_tabbed_changed (false);
 	}
 
 	XMLNodeList children = node.children ();
@@ -365,7 +472,21 @@ Tabbable::set_state (const XMLNode& node, int version)
 
 	if (window_node) {
 		window_node->get_property (X_("tabbed"), tab_requested_by_state);
+		float fract;
+		if ( window_node->get_property (string_compose("%1%2", _menu_name, X_("-rightpane-pos")).c_str(), fract) ) {
+			fract = std::max (.05f, std::min (.95f, fract));
+			content_right_pane.set_divider (0, fract);
+		}
+		if ( window_node->get_property (string_compose("%1%2", _menu_name, X_("-leftpane-pos")).c_str(), fract) ) {
+			fract = std::max (.05f, std::min (.95f, fract));
+			content_left_pane.set_divider (0, fract);
+		}
+		if ( window_node->get_property (string_compose("%1%2", _menu_name, X_("-bottompane-pos")).c_str(), fract) ) {
+			fract = std::max (.05f, std::min (.95f, fract));
+			content_midlevel_vpane.set_divider (0, fract);
+		}
 	}
+
 
 	if (!_visible) {
 		if (tab_requested_by_state) {
@@ -373,7 +494,6 @@ Tabbable::set_state (const XMLNode& node, int version)
 		} else {
 			/* this does nothing if not tabbed */
 			hide_tab ();
-			signal_tabbed_changed (false);
 		}
 	}
 
@@ -390,4 +510,76 @@ void
 Tabbable::window_unmapped ()
 {
 	StateChange (*this);
+}
+
+void
+Tabbable::showhide_att_right (bool yn)
+{
+	if (yn) {
+		content_right_vbox.show ();
+	} else {
+		content_right_vbox.hide ();
+	}
+}
+
+void
+Tabbable::att_right_button_toggled ()
+{
+	Glib::RefPtr<Gtk::Action> act = right_attachment_button.get_related_action();
+	if (act) {
+		Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic(act);
+		if (tact) {
+			showhide_att_right (tact->get_active());
+		}
+	} else {
+		showhide_att_right (false);
+	}
+}
+
+void
+Tabbable::showhide_att_left (bool yn)
+{
+	if (yn) {
+		content_att_left.show ();
+	} else {
+		content_att_left.hide ();
+	}
+}
+
+void
+Tabbable::att_left_button_toggled ()
+{
+	Glib::RefPtr<Gtk::Action> act = left_attachment_button.get_related_action();
+	if (act) {
+		Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic(act);
+		if (tact) {
+			showhide_att_left (tact->get_active());
+		}
+	} else {
+		showhide_att_left (false);
+	}
+}
+
+void
+Tabbable::showhide_att_bottom (bool yn)
+{
+	if (yn) {
+		content_att_bottom.show ();
+	} else {
+		content_att_bottom.hide ();
+	}
+}
+
+void
+Tabbable::att_bottom_button_toggled ()
+{
+	Glib::RefPtr<Gtk::Action> act = bottom_attachment_button.get_related_action();
+	if (act) {
+		Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic(act);
+		if (tact) {
+			showhide_att_bottom (tact->get_active());
+		}
+	} else {
+		showhide_att_bottom (false);
+	}
 }

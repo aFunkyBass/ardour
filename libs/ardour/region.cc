@@ -92,7 +92,7 @@ namespace ARDOUR {
 	}
 }
 
-PBD::Signal2<void,std::shared_ptr<ARDOUR::RegionList>,const PropertyChange&> Region::RegionsPropertyChanged;
+PBD::Signal<void(std::shared_ptr<ARDOUR::RegionList>,const PropertyChange&)> Region::RegionsPropertyChanged;
 
 /* these static values are used by Region Groups to assign a group-id across the scope of an operation that might span many function calls */
 uint64_t Region::_retained_group_id = 0;
@@ -126,7 +126,7 @@ Region::get_region_operation_group_id (uint64_t old_region_group, RegionOperatio
 
 	/* if a region group has not been assigned for this key, assign one */
 	if (_operation_rgroup_map.find (region_group_key) == _operation_rgroup_map.end ()) {
-		_operation_rgroup_map[region_group_key] = _next_group_id++;
+		_operation_rgroup_map[region_group_key] = ++_next_group_id;
 	}
 
 	return ((_operation_rgroup_map[region_group_key] << 4) | expl);
@@ -2152,13 +2152,13 @@ Region::subscribe_to_source_drop ()
 	for (auto const& i : _sources) {
 		if (unique_srcs.find (i) == unique_srcs.end ()) {
 			unique_srcs.insert (i);
-			i->DropReferences.connect_same_thread (_source_deleted_connections, boost::bind (&Region::source_deleted, this, std::weak_ptr<Source>(i)));
+			i->DropReferences.connect_same_thread (_source_deleted_connections, std::bind (&Region::source_deleted, this, std::weak_ptr<Source>(i)));
 		}
 	}
 	for (auto const& i : _master_sources) {
 		if (unique_srcs.find (i) == unique_srcs.end ()) {
 			unique_srcs.insert (i);
-			i->DropReferences.connect_same_thread (_source_deleted_connections, boost::bind (&Region::source_deleted, this, std::weak_ptr<Source>(i)));
+			i->DropReferences.connect_same_thread (_source_deleted_connections, std::bind (&Region::source_deleted, this, std::weak_ptr<Source>(i)));
 		}
 	}
 }

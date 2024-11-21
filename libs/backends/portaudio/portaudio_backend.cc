@@ -775,7 +775,7 @@ PortAudioBackend::process_callback(const float* input,
 bool
 PortAudioBackend::start_blocking_process_thread ()
 {
-	if (pbd_realtime_pthread_create (PBD_SCHED_FIFO, PBD_RT_PRI_MAIN, PBD_RT_STACKSIZE_PROC,
+	if (pbd_realtime_pthread_create ("PortAudio Main", PBD_SCHED_FIFO, PBD_RT_PRI_MAIN, PBD_RT_STACKSIZE_PROC,
 				&_main_blocking_thread, blocking_thread_func, this))
 	{
 		if (pbd_pthread_create (PBD_RT_STACKSIZE_PROC, &_main_blocking_thread, blocking_thread_func, this))
@@ -856,7 +856,7 @@ static void* freewheel_thread(void* arg)
 bool
 PortAudioBackend::start_freewheel_process_thread ()
 {
-	if (pthread_create(&_pthread_freewheel, NULL, freewheel_thread, this)) {
+	if (pbd_pthread_create (PBD_RT_STACKSIZE_PROC, &_pthread_freewheel, freewheel_thread, this)) {
 		DEBUG_AUDIO("Failed to create main audio thread\n");
 		return false;
 	}
@@ -1075,7 +1075,7 @@ void *
 PortAudioBackend::portaudio_process_thread (void *arg)
 {
 	ThreadData* td = reinterpret_cast<ThreadData*> (arg);
-	boost::function<void ()> f = td->f;
+	std::function<void ()> f = td->f;
 	delete td;
 
 #ifdef USE_MMCSS_THREAD_PRIORITIES
@@ -1098,12 +1098,12 @@ PortAudioBackend::portaudio_process_thread (void *arg)
 }
 
 int
-PortAudioBackend::create_process_thread (boost::function<void()> func)
+PortAudioBackend::create_process_thread (std::function<void()> func)
 {
 	pthread_t   thread_id;
 	ThreadData* td = new ThreadData (this, func, PBD_RT_STACKSIZE_PROC);
 
-	if (pbd_realtime_pthread_create (PBD_SCHED_FIFO, PBD_RT_PRI_PROC, PBD_RT_STACKSIZE_PROC,
+	if (pbd_realtime_pthread_create ("PortAudio Proc", PBD_SCHED_FIFO, PBD_RT_PRI_PROC, PBD_RT_STACKSIZE_PROC,
 				&thread_id, portaudio_process_thread, td)) {
 		if (pbd_pthread_create (PBD_RT_STACKSIZE_PROC, &thread_id, portaudio_process_thread, td)) {
 			DEBUG_AUDIO("Cannot create process thread.");
@@ -1428,7 +1428,7 @@ PortAudioBackend::set_latency_range (PortEngine::PortHandle port_handle, bool fo
 {
 	std::shared_ptr<BackendPort> port = std::dynamic_pointer_cast<BackendPort>(port_handle);
 	if (!valid_port (port)) {
-		DEBUG_PORTS("BackendPort::set_latency_range (): invalid port.\n");
+		DEBUG_PORTS ("PortAudioBackend::set_latency_range (): invalid port.\n");
 		return;
 	}
 	port->set_latency_range (latency_range, for_playback);
@@ -1440,7 +1440,7 @@ PortAudioBackend::get_latency_range (PortEngine::PortHandle port_handle, bool fo
 	std::shared_ptr<BackendPort> port = std::dynamic_pointer_cast<BackendPort>(port_handle);
 	LatencyRange r;
 	if (!valid_port (port)) {
-		DEBUG_PORTS("BackendPort::get_latency_range (): invalid port.\n");
+		DEBUG_PORTS ("PortAudioBackend::get_latency_range (): invalid port.\n");
 		r.min = 0;
 		r.max = 0;
 		return r;

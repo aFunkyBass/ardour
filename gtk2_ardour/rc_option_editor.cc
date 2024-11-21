@@ -81,6 +81,7 @@
 #include "rc_option_editor.h"
 #include "sfdb_ui.h"
 #include "transport_masters_dialog.h"
+#include "application_bar.h"
 #include "ui_config.h"
 #include "utils.h"
 
@@ -1380,13 +1381,13 @@ protected:
 		AudioEngine::instance()->PortRegisteredOrUnregistered.connect (
 				_engine_connection,
 				invalidator (*this),
-				boost::bind (&PortSelectOption::update_port_combo, this),
+				std::bind (&PortSelectOption::update_port_combo, this),
 				gui_context());
 
 		AudioEngine::instance()->PortPrettyNameChanged.connect (
 				_engine_connection,
 				invalidator (*this),
-				boost::bind (&PortSelectOption::update_port_combo, this),
+				std::bind (&PortSelectOption::update_port_combo, this),
 				gui_context());
 	}
 
@@ -1612,7 +1613,7 @@ class ControlSurfacesOptions : public OptionEditorMiniPage
 
 			ControlProtocolManager& m = ControlProtocolManager::instance ();
 			m.ProtocolStatusChange.connect (protocol_status_connection, MISSING_INVALIDATOR,
-					boost::bind (&ControlSurfacesOptions::protocol_status_changed, this, _1), gui_context());
+					std::bind (&ControlSurfacesOptions::protocol_status_changed, this, _1), gui_context());
 
 			_store->signal_row_changed().connect (sigc::mem_fun (*this, &ControlSurfacesOptions::view_changed));
 			_view.signal_button_press_event().connect_notify (sigc::mem_fun(*this, &ControlSurfacesOptions::edit_clicked));
@@ -2104,15 +2105,15 @@ class MidiPortOptions : public OptionEditorMiniPage, public sigc::trackable
 
 			AudioEngine::instance()->PortRegisteredOrUnregistered.connect (connections,
 					invalidator (*this),
-					boost::bind (&MidiPortOptions::refill, this),
+					std::bind (&MidiPortOptions::refill, this),
 					gui_context());
 			AudioEngine::instance()->MidiPortInfoChanged.connect (connections,
 					invalidator (*this),
-					boost::bind (&MidiPortOptions::refill, this),
+					std::bind (&MidiPortOptions::refill, this),
 					gui_context());
 			AudioEngine::instance()->MidiSelectionPortsChanged.connect (connections,
 					invalidator (*this),
-					boost::bind (&MidiPortOptions::refill, this),
+					std::bind (&MidiPortOptions::refill, this),
 					gui_context());
 		}
 
@@ -2362,7 +2363,7 @@ MidiPortOptions::pretty_name_edit (std::string const & path, string const & new_
 RCOptionEditor::RCOptionEditor ()
 	: OptionEditorContainer (Config)
 	  /* pack self-as-vbox into tabbable */
-	, Tabbable (*this, _("Preferences"), X_("preferences"), /* detached by default */ false)
+	, Tabbable (_("Preferences"), X_("preferences"), this, /* detached by default */ false)
 	, _rc_config (Config)
 	, _mixer_strip_visibility ("mixer-element-visibility")
 	, _cairo_image_surface (0)
@@ -3753,6 +3754,14 @@ These settings will only take effect after %1 is restarted.\n\
 	                     );
 	add_option (_("Transport"), bo);
 
+
+	bo = new BoolOption ("stop-on-grid",
+	                     _("Stop transport using the current grid (if any)"),
+	                     sigc::mem_fun (*_rc_config, &RCConfiguration::get_stop_on_grid),
+	                     sigc::mem_fun (*_rc_config, &RCConfiguration::set_stop_on_grid)
+	                     );
+	add_option (_("Transport"), bo);
+
 	add_option (_("Transport"), new OptionEditorHeading (_("Looping")));
 
 	bo = new BoolOption (
@@ -4354,7 +4363,6 @@ These settings will only take effect after %1 is restarted.\n\
 	}
 
 	string prog (PROGRAM_NAME);
-	boost::algorithm::to_lower (prog);
 	mm->add (SoftwareMonitoring, string_compose (_("%1"), prog));
 	mm->add (ExternalMonitoring, _("Audio Hardware"));
 
@@ -4950,6 +4958,19 @@ These settings will only take effect after %1 is restarted.\n\
 		procs->set_note (string_compose (_("This setting will only take effect when %1 is restarted."), PROGRAM_NAME));
 
 		add_option (_("Performance"), procs);
+
+#ifndef PLATFORM_WINDOWS
+		ComboOption<int32_t>* iotp = new ComboOption<int32_t> (
+		     "io-thread-policy",
+		     _("Disk I/O thread scheduling policy"),
+		     sigc::mem_fun (*_rc_config, &RCConfiguration::get_io_thread_policy),
+		     sigc::mem_fun (*_rc_config, &RCConfiguration::set_io_thread_policy)
+		     );
+		iotp->add (0, _("No priority"));
+		iotp->add (1, _("Realtime (FIFO)"));
+		iotp->add (1, _("Realtime (Round Robin)"));
+		add_option (_("Performance"), iotp);
+#endif
 	}
 
 	/* Image cache size */
@@ -5092,6 +5113,9 @@ void
 RCOptionEditor::set_session (Session *s)
 {
 	SessionHandlePtr::set_session (s);
+	if (!s) {
+		return;
+	}
 	_transport_masters_widget.set_session (s);
 }
 

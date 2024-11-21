@@ -22,8 +22,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_plugin_ui_h__
-#define __ardour_plugin_ui_h__
+#pragma once
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-config.h"
@@ -220,7 +219,7 @@ private:
 class GenericPluginUI : public PlugUIBase, public Gtk::VBox
 {
 public:
-	GenericPluginUI (std::shared_ptr<ARDOUR::PlugInsertBase> plug, bool scrollable=false);
+	GenericPluginUI (std::shared_ptr<ARDOUR::PlugInsertBase> plug, bool scrollable = false, bool ctrls_only = false);
 	~GenericPluginUI ();
 
 	gint get_preferred_height () { return prefheight; }
@@ -237,6 +236,7 @@ private:
 
 	gint prefheight;
 	bool is_scrollable;
+	bool want_ctrl_only;
 
 	struct MeterInfo {
 		ArdourWidgets::FastMeter* meter;
@@ -411,4 +411,3 @@ extern VSTPluginUI* create_mac_vst_gui (std::shared_ptr<ARDOUR::PlugInsertBase>)
 extern PlugUIBase* create_au_gui (std::shared_ptr<ARDOUR::PlugInsertBase>, Gtk::VBox**);
 #endif
 
-#endif /* __ardour_plugin_ui_h__ */

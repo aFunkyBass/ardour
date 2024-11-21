@@ -32,6 +32,7 @@
 #include "ardour/disk_reader.h"
 #include "ardour/io_tasklist.h"
 #include "ardour/process_thread.h"
+#include "ardour/rc_configuration.h"
 #include "ardour/session_event.h"
 
 #include "pbd/i18n.h"
@@ -50,35 +51,42 @@ IOTaskList::IOTaskList (uint32_t n_threads)
 		return;
 	}
 
-	pthread_attr_t     attr;
-	struct sched_param parm;
-	parm.sched_priority = pbd_absolute_rt_priority (SCHED_RR, pbd_pthread_priority (THREAD_IO));
+	bool use_rt;
+	int  policy;
 
-  pthread_attr_init (&attr);
+	switch (Config->get_io_thread_policy ()) {
+		case 1:
+			use_rt = true;
+			policy = SCHED_FIFO;
+			break;
+		case 2:
+			use_rt = true;
+			policy = SCHED_RR;
+			break;
+		default:
+			use_rt = false;
+			policy = SCHED_OTHER;
+			break;
+	}
+
 #ifdef PLATFORM_WINDOWS
-  pthread_attr_setschedpolicy (&attr, SCHED_OTHER);
-#else
-  pthread_attr_setschedpolicy (&attr, SCHED_RR);
+	policy = SCHED_OTHER;
 #endif
-  pthread_attr_setschedparam (&attr, &parm);
-  pthread_attr_setscope (&attr, PTHREAD_SCOPE_SYSTEM);
-  pthread_attr_setinheritsched (&attr, PTHREAD_EXPLICIT_SCHED);
 
-	DEBUG_TRACE (PBD::DEBUG::IOTaskList, string_compose ("IOTaskList starting %1 threads with priority = %2\n", _n_threads, parm.sched_priority));
+	DEBUG_TRACE (PBD::DEBUG::IOTaskList, string_compose ("IOTaskList starting %1 threads with sched policy = %2\n", _n_threads, policy));
 
 	_workers.resize (_n_threads);
 	for (uint32_t i = 0; i < _n_threads; ++i) {
-		if (pthread_create (&_workers[i], &attr, &_worker_thread, this)) {
-			if (pthread_create (&_workers[i], NULL, &_worker_thread, this)) {
+		if (!use_rt || pbd_realtime_pthread_create ("I/O", policy, PBD_RT_PRI_IOFX, 0, &_workers[i], &_worker_thread, this)) {
+			if (use_rt && i == 0) {
+				PBD::warning << _("IOTaskList: cannot acquire realtime permissions.") << endmsg;
+			}
+			if (pbd_pthread_create (0, &_workers[i], &_worker_thread, this)) {
 				std::cerr << "Failed to start IOTaskList thread\n";
 				throw failed_constructor ();
 			}
-			if (i == 0) {
-				PBD::warning << _("IOTaskList: cannot acquire realtime permissions.") << endmsg;
-			}
 		}
 	}
-	pthread_attr_destroy (&attr);
 }
 
 IOTaskList::~IOTaskList ()
@@ -93,7 +101,7 @@ IOTaskList::~IOTaskList ()
 }
 
 void
-IOTaskList::push_back (boost::function<void ()> fn)
+IOTaskList::push_back (std::function<void ()> fn)
 {
 	_tasks.push_back (fn);
 }
@@ -139,8 +147,8 @@ IOTaskList::_worker_thread (void* me)
 
 #ifdef HAVE_IOPRIO
 	/* compare to Butler::_thread_work */
-  // ioprio_set (IOPRIO_WHO_PROCESS, 0 /*calling thread*/, IOPRIO_PRIO_VALUE (IOPRIO_CLASS_RT, 4))
-  syscall (SYS_ioprio_set, 1, 0, (1 << 13) | 4);
+	// ioprio_set (IOPRIO_WHO_PROCESS, 0 /*calling thread*/, IOPRIO_PRIO_VALUE (IOPRIO_CLASS_RT, 4))
+	syscall (SYS_ioprio_set, 1, 0, (1 << 13) | 4);
 #endif
 
 	self->io_thread ();
@@ -163,7 +171,7 @@ IOTaskList::io_thread ()
 		Temporal::TempoMap::fetch ();
 
 		while (1) {
-			boost::function<void()> fn;
+			std::function<void()> fn;
 			Glib::Threads::Mutex::Lock lm (_tasks_mutex);
 			if (_tasks.empty ()) {
 				break;

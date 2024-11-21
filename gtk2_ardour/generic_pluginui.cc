@@ -84,10 +84,11 @@ using namespace ArdourWidgets;
 using namespace Gtk;
 using namespace ARDOUR_UI_UTILS;
 
-GenericPluginUI::GenericPluginUI (std::shared_ptr<PlugInsertBase> pib, bool scrollable)
+GenericPluginUI::GenericPluginUI (std::shared_ptr<PlugInsertBase> pib, bool scrollable, bool ctrls_only)
 	: PlugUIBase (pib)
 	, automation_menu (0)
 	, is_scrollable(scrollable)
+	, want_ctrl_only(ctrls_only)
 	, _plugin_pianokeyboard_expander (_("MIDI Keyboard (audition only)"))
 	, _piano (0)
 	, _piano_velocity (*manage (new Adjustment (100, 1, 127, 1, 16)))
@@ -121,7 +122,9 @@ GenericPluginUI::GenericPluginUI (std::shared_ptr<PlugInsertBase> pib, bool scro
 	automation_latch_all_button.set_text (GainMeterBase::astate_string (ARDOUR::Latch));
 	automation_latch_all_button.set_name (X_("generic button"));
 
-	if (_pib->ui_elements () & PlugInsertBase::MIDIKeyboard) {
+	if (ctrls_only) {
+		// relax
+	} else if (_pib->ui_elements () & PlugInsertBase::MIDIKeyboard) {
 		_piano = new APianoKeyboard ();
 		_piano->set_can_focus ();
 
@@ -149,11 +152,11 @@ GenericPluginUI::GenericPluginUI (std::shared_ptr<PlugInsertBase> pib, bool scro
 		pack_end (plugin_analysis_expander, false, false);
 	}
 
-	if (_pib->provides_stats ()) {
+	if (!ctrls_only && _pib->provides_stats ()) {
 		pack_end (cpuload_expander, false, false);
 	}
 
-	if (!plugin->get_docs().empty()) {
+	if (!ctrls_only && !plugin->get_docs().empty()) {
 		pack_end (description_expander, false, false);
 	}
 
@@ -175,10 +178,12 @@ GenericPluginUI::GenericPluginUI (std::shared_ptr<PlugInsertBase> pib, bool scro
 		settings_box.pack_start (*automation_hbox, false, false, 6);
 	}
 
-	main_contents.pack_start (settings_box, false, false);
+	if (!ctrls_only) {
+		main_contents.pack_start (settings_box, false, false);
+	}
 
 	if (_pi) {
-		_pi->ActiveChanged.connect (active_connection, invalidator (*this), boost::bind (&GenericPluginUI::processor_active_changed, this, std::weak_ptr<Processor>(_pi)), gui_context());
+		_pi->ActiveChanged.connect (active_connection, invalidator (*this), std::bind (&GenericPluginUI::processor_active_changed, this, std::weak_ptr<Processor>(_pi)), gui_context());
 		_bypass_button.set_active (!_pi->enabled());
 	} else {
 		_bypass_button.set_sensitive (false);
@@ -385,7 +390,7 @@ GenericPluginUI::build ()
 		 * AutomationControl has only support for numeric values currently.
 		 * The only case is Variant::PATH for now */
 		plugin->PropertyChanged.connect(*this, invalidator(*this),
-				boost::bind(&GenericPluginUI::path_property_changed, this, _1, _2),
+				std::bind(&GenericPluginUI::path_property_changed, this, _1, _2),
 				gui_context());
 
 		/* and query current property value */
@@ -410,7 +415,7 @@ GenericPluginUI::build ()
 	automation_latch_all_button.signal_clicked.connect(sigc::bind (sigc::mem_fun (*this, &GenericPluginUI::set_all_automation), ARDOUR::Latch));
 
 	/* XXX This is a workaround for AutomationControl not knowing about preset loads */
-	plugin->PresetLoaded.connect (*this, invalidator (*this), boost::bind (&GenericPluginUI::update_input_displays, this), gui_context ());
+	plugin->PresetLoaded.connect (*this, invalidator (*this), std::bind (&GenericPluginUI::update_input_displays, this), gui_context ());
 }
 
 
@@ -498,7 +503,7 @@ GenericPluginUI::automatic_layout (const std::vector<ControlUI*>& control_uis)
 			// we can lay them out a bit more nicely later.
 			cui_controls_list.push_back(cui);
 
-		} else if (cui->display) {
+		} else if (cui->display && !want_ctrl_only) {
 
 			output_table->attach (*cui, output_col, output_col + 1, output_row, output_row+1,
 			                     FILL|EXPAND, FILL);
@@ -619,7 +624,7 @@ GenericPluginUI::automatic_layout (const std::vector<ControlUI*>& control_uis)
 		delete output_table;
 	}
 
-	if (plugin->has_inline_display () && plugin->inline_display_in_gui ()) {
+	if (!want_ctrl_only && plugin->has_inline_display () && plugin->inline_display_in_gui ()) {
 		PluginDisplay* pd = manage (new PluginDisplay (plugin, 300));
 		hpacker.pack_end (*pd, true, true);
 	}
@@ -666,12 +671,12 @@ GenericPluginUI::build_midi_table ()
 
 	_pib->plugin()->BankPatchChange.connect (
 			midi_connections, invalidator (*this),
-			boost::bind (&GenericPluginUI::midi_bank_patch_change, this, _1),
+			std::bind (&GenericPluginUI::midi_bank_patch_change, this, _1),
 			gui_context());
 
 	_pib->plugin()->UpdatedMidnam.connect (
 			midi_connections, invalidator (*this),
-			boost::bind (&GenericPluginUI::midi_refill_patches, this),
+			std::bind (&GenericPluginUI::midi_refill_patches, this),
 			gui_context());
 }
 
@@ -1029,7 +1034,7 @@ GenericPluginUI::build_control_ui (const Evoral::Parameter&             param,
 			mcontrol->alist()->automation_state_changed.connect (
 					control_connections,
 					invalidator (*this),
-					boost::bind (&GenericPluginUI::automation_state_changed, this, control_ui),
+					std::bind (&GenericPluginUI::automation_state_changed, this, control_ui),
 					gui_context());
 			input_controls_with_automation.push_back (control_ui);
 		}
@@ -1114,7 +1119,7 @@ GenericPluginUI::build_control_ui (const Evoral::Parameter&             param,
 
 	if (mcontrol) {
 		mcontrol->Changed.connect(control_connections, invalidator(*this),
-		                          boost::bind(&GenericPluginUI::ui_parameter_changed,
+		                          std::bind(&GenericPluginUI::ui_parameter_changed,
 		                                      this, control_ui),
 		                          gui_context());
 	}
@@ -1189,7 +1194,7 @@ GenericPluginUI::ui_parameter_changed (ControlUI* cui)
 {
 	if (!cui->update_pending) {
 		cui->update_pending = true;
-		Gtkmm2ext::UI::instance()->call_slot (MISSING_INVALIDATOR, boost::bind (&GenericPluginUI::update_control_display, this, cui));
+		Gtkmm2ext::UI::instance()->call_slot (MISSING_INVALIDATOR, std::bind (&GenericPluginUI::update_control_display, this, cui));
 	}
 }
 

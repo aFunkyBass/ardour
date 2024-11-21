@@ -44,6 +44,7 @@
 #include "pbd/basename.h"
 #include "pbd/pthread_utils.h"
 #include "pbd/memento_command.h"
+#include "pbd/stacktrace.h"
 #include "pbd/unwind.h"
 #include "pbd/whitespace.h"
 #include "pbd/stateful_diff_command.h"
@@ -89,6 +90,7 @@
 #include "audio_region_view.h"
 #include "audio_streamview.h"
 #include "audio_time_axis.h"
+#include "automation_line.h"
 #include "automation_time_axis.h"
 #include "control_point.h"
 #include "debug.h"
@@ -111,7 +113,6 @@
 #include "note.h"
 #include "paste_context.h"
 #include "patch_change_dialog.h"
-#include "quantize_dialog.h"
 #include "region_gain_line.h"
 #include "route_time_axis.h"
 #include "selection.h"
@@ -145,8 +146,73 @@ using Gtkmm2ext::Keyboard;
   Editor operations
  ***********************************************************************/
 
+HistoryOwner&
+Editor::history()
+{
+	assert (_session);
+	return *_session;
+}
+
 void
-Editor::undo (uint32_t n)
+Editor::add_command (PBD::Command * cmd)
+{
+	if (_session) {
+		_session->add_command (cmd);
+	}
+}
+
+void
+Editor::begin_reversible_command (string name)
+{
+	if (_session) {
+		before.push_back (&_selection_memento->get_state ());
+		_session->begin_reversible_command (name);
+	}
+}
+
+void
+Editor::begin_reversible_command (GQuark q)
+{
+	if (_session) {
+		before.push_back (&_selection_memento->get_state ());
+		_session->begin_reversible_command (q);
+	}
+}
+
+void
+Editor::abort_reversible_command ()
+{
+	if (_session) {
+		while(!before.empty()) {
+			delete before.front();
+			before.pop_front();
+		}
+		_session->abort_reversible_command ();
+	}
+}
+
+void
+Editor::commit_reversible_command ()
+{
+	if (_session) {
+		if (before.size() == 1) {
+			_session->add_command (new MementoCommand<SelectionMemento>(*(_selection_memento), before.front(), &_selection_memento->get_state ()));
+			begin_selection_op_history ();
+		}
+
+		if (before.empty()) {
+			PBD::stacktrace (std::cerr, 30);
+			std::cerr << "Please call begin_reversible_command() before commit_reversible_command()." << std::endl;
+		} else {
+			before.pop_back();
+		}
+
+		_session->commit_reversible_command ();
+	}
+}
+
+void
+Editor::do_undo (uint32_t n)
 {
 	if (_session && _session->actively_recording()) {
 		/* no undo allowed while recording. Session will check also,
@@ -167,7 +233,7 @@ Editor::undo (uint32_t n)
 }
 
 void
-Editor::redo (uint32_t n)
+Editor::do_redo (uint32_t n)
 {
 	if (_session && _session->actively_recording()) {
 		/* no redo allowed while recording. Session will check also,
@@ -4462,7 +4528,7 @@ Editor::bounce_range_selection (BounceTarget target, bool with_processing)
 			if (!track) {
 				continue;
 			}
-			if (track->triggerbox()->trigger(trigger_slot)->region()) {
+			if (track->triggerbox()->trigger(trigger_slot)->playable()) {
 				overwriting = true;
 			}
 		}
@@ -4751,7 +4817,7 @@ Editor::cut_copy (CutCopyOp op)
 
 
 struct AutomationRecord {
-	AutomationRecord () : state (0) , line(NULL) {}
+	AutomationRecord () : state (0) , line (nullptr) {}
 	AutomationRecord (XMLNode* s, const AutomationLine* l) : state (s) , line (l) {}
 
 	XMLNode* state; ///< state before any operation
@@ -4778,7 +4844,9 @@ Editor::cut_copy_points (Editing::CutCopyOp op, timepos_t const & earliest_time)
 	timepos_t earliest (earliest_time);
 
 	/* XXX: not ideal, as there may be more than one track involved in the point selection */
-	_last_cut_copy_source_track = &selection->points.front()->line().trackview;
+	EditorAutomationLine* line = dynamic_cast<EditorAutomationLine*> (&selection->points.front()->line());
+	assert (line);
+	_last_cut_copy_source_track = &line->trackview;
 
 	/* Keep a record of the AutomationLists that we end up using in this operation */
 	typedef std::map<std::shared_ptr<AutomationList>, AutomationRecord> Lists;
@@ -4788,8 +4856,8 @@ Editor::cut_copy_points (Editing::CutCopyOp op, timepos_t const & earliest_time)
 	selection->points.sort(PointsSelectionPositionSorter ());
 
 	/* Go through all selected points, making an AutomationRecord for each distinct AutomationList */
-	for (PointSelection::iterator sel_point = selection->points.begin(); sel_point != selection->points.end(); ++sel_point) {
-		const AutomationLine&                   line = (*sel_point)->line();
+	for (auto & selected_point : selection->points) {
+		const AutomationLine& line (selected_point->line());
 		const std::shared_ptr<AutomationList> al   = line.the_list();
 		if (lists.find (al) == lists.end ()) {
 			/* We haven't seen this list yet, so make a record for it.  This includes
@@ -4809,9 +4877,9 @@ Editor::cut_copy_points (Editing::CutCopyOp op, timepos_t const & earliest_time)
 
 		/* Add all selected points to the relevant copy ControlLists */
 
-		for (PointSelection::iterator sel_point = selection->points.begin(); sel_point != selection->points.end(); ++sel_point) {
-			std::shared_ptr<AutomationList>    al = (*sel_point)->line().the_list();
-			AutomationList::const_iterator ctrl_evt = (*sel_point)->model ();
+		for (auto & selected_point : selection->points) {
+			std::shared_ptr<AutomationList>    al = selected_point->line().the_list();
+			AutomationList::const_iterator ctrl_evt = selected_point->model ();
 
 			lists[al].copy->fast_simple_add ((*ctrl_evt)->when, (*ctrl_evt)->value);
 			earliest = std::min (earliest, (*ctrl_evt)->when);
@@ -4841,21 +4909,21 @@ Editor::cut_copy_points (Editing::CutCopyOp op, timepos_t const & earliest_time)
 		}
 
 		/* Remove each selected point from its AutomationList */
-		for (PointSelection::iterator sel_point = selection->points.begin(); sel_point != selection->points.end(); ++sel_point) {
-			AutomationLine& line = (*sel_point)->line ();
+		for (auto & selected_point : selection->points) {
+			AutomationLine& line (selected_point->line ());
 			std::shared_ptr<AutomationList> al = line.the_list();
 
 			bool erase = true;
 
 			if (dynamic_cast<RegionFxLine*> (&line)) {
 				/* removing of first and last gain point in region gain lines is prohibited*/
-				if (line.is_last_point (*(*sel_point)) || line.is_first_point (*(*sel_point))) {
+				if (line.is_last_point (*selected_point) || line.is_first_point (*selected_point)) {
 					erase = false;
 				}
 			}
 
 			if(erase) {
-				al->erase ((*sel_point)->model ());
+				al->erase (selected_point->model ());
 			}
 		}
 
@@ -5641,16 +5709,6 @@ Editor::duplicate_selection (float times)
 	}
 }
 
-/** Reset all selected points to the relevant default value */
-void
-Editor::reset_point_selection ()
-{
-	for (PointSelection::iterator i = selection->points.begin(); i != selection->points.end(); ++i) {
-		ARDOUR::AutomationList::iterator j = (*i)->model ();
-		(*j)->value = (*i)->line().the_list()->descriptor ().normal;
-	}
-}
-
 void
 Editor::center_playhead ()
 {
@@ -6131,54 +6189,6 @@ Editor::strip_region_silence ()
 	}
 }
 
-PBD::Command*
-Editor::apply_midi_note_edit_op_to_region (MidiOperator& op, MidiRegionView& mrv)
-{
-	Evoral::Sequence<Temporal::Beats>::Notes selected;
-	mrv.selection_as_notelist (selected, true);
-
-	if (selected.empty()) {
-		return 0;
-	}
-
-	vector<Evoral::Sequence<Temporal::Beats>::Notes> v;
-	v.push_back (selected);
-
-	timepos_t pos = mrv.midi_region()->source_position();
-
-	return op (mrv.midi_region()->model(), pos.beats(), v);
-}
-
-void
-Editor::apply_midi_note_edit_op (MidiOperator& op, const RegionSelection& rs)
-{
-	if (rs.empty()) {
-		return;
-	}
-
-	bool in_command = false;
-
-	vector<MidiRegionView*> views = filter_to_unique_midi_region_views (rs);
-
-	for (vector<MidiRegionView*>::iterator mrv = views.begin(); mrv != views.end(); ++mrv) {
-
-		Command* cmd = apply_midi_note_edit_op_to_region (op, **mrv);
-		if (cmd) {
-			if (!in_command) {
-				begin_reversible_command (op.name ());
-				in_command = true;
-			}
-			(*cmd)();
-			_session->add_command (cmd);
-			}
-	}
-
-	if (in_command) {
-		commit_reversible_command ();
-		_session->set_dirty ();
-	}
-}
-
 #include "ardour/midi_source.h" // MidiSource::name()
 
 void
@@ -6308,165 +6318,6 @@ Editor::fork_selected_regions ()
 	}
 }
 
-void
-Editor::quantize_region ()
-{
-	if (_session) {
-		quantize_regions(get_regions_from_selection_and_entered ());
-	}
-}
-
-void
-Editor::quantize_regions (const RegionSelection& rs)
-{
-	if (rs.n_midi_regions() == 0) {
-		return;
-	}
-
-	Quantize* quant = get_quantize_op ();
-
-	if (!quant) {
-		return;
-	}
-
-	if (!quant->empty()) {
-		apply_midi_note_edit_op (*quant, rs);
-	}
-
-	delete quant;
-}
-
-Quantize*
-Editor::get_quantize_op ()
-{
-	if (!quantize_dialog) {
-		quantize_dialog = new QuantizeDialog (*this);
-	}
-
-	quantize_dialog->present ();
-	int r = quantize_dialog->run ();
-	quantize_dialog->hide ();
-
-
-	if (r != Gtk::RESPONSE_OK) {
-		return nullptr;
-	}
-
-	return new Quantize (quantize_dialog->snap_start(),
-	                     quantize_dialog->snap_end(),
-	                     quantize_dialog->start_grid_size(),
-	                     quantize_dialog->end_grid_size(),
-	                     quantize_dialog->strength(),
-	                     quantize_dialog->swing(),
-	                     quantize_dialog->threshold());
-}
-
-void
-Editor::legatize_region (bool shrink_only)
-{
-	if (_session) {
-		legatize_regions(get_regions_from_selection_and_entered (), shrink_only);
-	}
-}
-
-void
-Editor::deinterlace_midi_regions (const RegionSelection& rs)
-{
-	begin_reversible_command (_("de-interlace midi"));
-
-	RegionSelection rcopy = rs;
-	if (_session) {
-
-		for (RegionSelection::iterator i = rcopy.begin (); i != rcopy.end(); i++) {
-			MidiRegionView* const mrv = dynamic_cast<MidiRegionView*> (*i);
-			if (mrv) {
-				XMLNode& before (mrv->region()->playlist()->get_state());
-
-				/* pass the regions to deinterlace_midi_region*/
-				_session->deinterlace_midi_region(mrv->midi_region());
-
-				XMLNode& after (mrv->region()->playlist()->get_state());
-				_session->add_command (new MementoCommand<Playlist>(*(mrv->region()->playlist()), &before, &after));
-			}
-		}
-	}
-
-	/* Remove the original region(s) safely, without rippling, as part of this command */
-	remove_regions(rs, false /*can_ripple*/, true /*as_part_of_other_command*/);
-
-	commit_reversible_command ();
-}
-
-void
-Editor::deinterlace_selected_midi_regions ()
-{
-	if (_session) {
-		RegionSelection rs = get_regions_from_selection_and_entered ();
-		deinterlace_midi_regions(rs);
-	}
-}
-
-void
-Editor::legatize_regions (const RegionSelection& rs, bool shrink_only)
-{
-	if (rs.n_midi_regions() == 0) {
-		return;
-	}
-
-	Legatize legatize(shrink_only);
-	apply_midi_note_edit_op (legatize, rs);
-}
-
-void
-Editor::transform_region ()
-{
-	if (_session) {
-		transform_regions(get_regions_from_selection_and_entered ());
-	}
-}
-
-void
-Editor::transform_regions (const RegionSelection& rs)
-{
-	if (rs.n_midi_regions() == 0) {
-		return;
-	}
-
-	TransformDialog td;
-
-	td.present();
-	const int r = td.run();
-	td.hide();
-
-	if (r == Gtk::RESPONSE_OK) {
-		Transform transform(td.get());
-		apply_midi_note_edit_op(transform, rs);
-	}
-}
-
-void
-Editor::transpose_region ()
-{
-	if (_session) {
-		transpose_regions(get_regions_from_selection_and_entered ());
-	}
-}
-
-void
-Editor::transpose_regions (const RegionSelection& rs)
-{
-	if (rs.n_midi_regions() == 0) {
-		return;
-	}
-
-	TransposeDialog d;
-	int const r = d.run ();
-
-	if (r == RESPONSE_ACCEPT) {
-		Transpose transpose(d.semitones ());
-		apply_midi_note_edit_op (transpose, rs);
-	}
-}
 
 void
 Editor::insert_patch_change (bool from_context)
@@ -6586,6 +6437,43 @@ Editor::apply_filter (Filter& filter, string command, ProgressReporter* progress
 
 	if (in_command) {
 		commit_reversible_command ();
+	}
+}
+
+void
+Editor::deinterlace_midi_regions (const RegionSelection& rs)
+{
+	begin_reversible_command (_("de-interlace midi"));
+
+	RegionSelection rcopy = rs;
+	if (_session) {
+
+		for (RegionSelection::iterator i = rcopy.begin (); i != rcopy.end(); i++) {
+			MidiRegionView* const mrv = dynamic_cast<MidiRegionView*> (*i);
+			if (mrv) {
+				XMLNode& before (mrv->region()->playlist()->get_state());
+
+				/* pass the regions to deinterlace_midi_region*/
+				_session->deinterlace_midi_region(mrv->midi_region());
+
+				XMLNode& after (mrv->region()->playlist()->get_state());
+				_session->add_command (new MementoCommand<Playlist>(*(mrv->region()->playlist()), &before, &after));
+			}
+		}
+	}
+
+	/* Remove the original region(s) safely, without rippling, as part of this command */
+	remove_regions(rs, false /*can_ripple*/, true /*as_part_of_other_command*/);
+
+	commit_reversible_command ();
+}
+
+void
+Editor::deinterlace_selected_midi_regions ()
+{
+	if (_session) {
+		RegionSelection rs = region_selection ();
+		deinterlace_midi_regions(rs);
 	}
 }
 
@@ -9264,7 +9152,7 @@ Editor::unlock ()
 void
 Editor::bring_in_callback (Gtk::Label* label, uint32_t n, uint32_t total, string name)
 {
-	Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), boost::bind (&Editor::update_bring_in_message, this, label, n, total, name));
+	Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), std::bind (&Editor::update_bring_in_message, this, label, n, total, name));
 }
 
 void
@@ -9296,7 +9184,7 @@ Editor::bring_all_sources_into_session ()
 
 	cerr << " Do it\n";
 
-	_session->bring_all_sources_into_session (boost::bind (&Editor::bring_in_callback, this, &msg, _1, _2, _3));
+	_session->bring_all_sources_into_session (std::bind (&Editor::bring_in_callback, this, &msg, _1, _2, _3));
 }
 
 void
@@ -9320,9 +9208,9 @@ Editor::toggle_all_existing_automation ()
 	}
 
 	if (!some_automation_shown) {
-		tvl.foreach_stripable_time_axis (boost::bind (&StripableTimeAxisView::show_existing_automation, _1, false));
+		tvl.foreach_stripable_time_axis (std::bind (&StripableTimeAxisView::show_existing_automation, _1, false));
 	} else {
-		tvl.foreach_stripable_time_axis (boost::bind (&StripableTimeAxisView::hide_all_automation, _1, false));
+		tvl.foreach_stripable_time_axis (std::bind (&StripableTimeAxisView::hide_all_automation, _1, false));
 	}
 }
 
@@ -9349,10 +9237,10 @@ Editor::toggle_layer_display ()
 
 	if (seen_stacked && seen_overlaid) {
 		/* inconsistent current display - go to overlaid */
-		tvl.foreach_route_time_axis (boost::bind (&RouteTimeAxisView::set_layer_display, _1, Overlaid));
+		tvl.foreach_route_time_axis (std::bind (&RouteTimeAxisView::set_layer_display, _1, Overlaid));
 
 	} else {
-		tvl.foreach_route_time_axis (boost::bind (&RouteTimeAxisView::toggle_layer_display, _1));
+		tvl.foreach_route_time_axis (std::bind (&RouteTimeAxisView::toggle_layer_display, _1));
 	}
 
 }
@@ -9361,14 +9249,14 @@ void
 Editor::layer_display_overlaid ()
 {
 	TrackViewList & tvl (selection->tracks.empty() ? track_views : selection->tracks);
-	tvl.foreach_route_time_axis (boost::bind (&RouteTimeAxisView::set_layer_display, _1, Overlaid));
+	tvl.foreach_route_time_axis (std::bind (&RouteTimeAxisView::set_layer_display, _1, Overlaid));
 }
 
 void
 Editor::layer_display_stacked ()
 {
 	TrackViewList & tvl (selection->tracks.empty() ? track_views : selection->tracks);
-	tvl.foreach_route_time_axis (boost::bind (&RouteTimeAxisView::set_layer_display, _1, Stacked));
+	tvl.foreach_route_time_axis (std::bind (&RouteTimeAxisView::set_layer_display, _1, Stacked));
 }
 
 void
@@ -9384,69 +9272,6 @@ Editor::launch_playlist_selector ()
 
 	if (rtav && rtav->is_track()) {
 		rtav->show_playlist_selector ();
-	}
-}
-
-vector<MidiRegionView*>
-Editor::filter_to_unique_midi_region_views (RegionSelection const & ms) const
-{
-	typedef std::pair<std::shared_ptr<MidiSource>,timepos_t> MapEntry;
-	std::set<MapEntry> single_region_set;
-
-	vector<MidiRegionView*> views;
-
-	/* build a list of regions that are unique with respect to their source
-	 * and start position. Note: this is non-exhaustive... if someone has a
-	 * non-forked copy of a MIDI region and then suitably modifies it, this
-	 * will still put both regions into the list of things to be acted
-	 * upon.
-	 *
-	 * Solution: user should not select both regions, or should fork one of them.
-	 */
-
-	for (MidiRegionSelection::const_iterator i = ms.begin(); i != ms.end(); ++i) {
-
-		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (*i);
-
-		if (!mrv) {
-			continue;
-		}
-
-		MapEntry entry = make_pair (mrv->midi_region()->midi_source(), mrv->region()->start());
-
-		if (single_region_set.insert (entry).second) {
-			views.push_back (mrv);
-		}
-	}
-
-	return views;
-}
-
-
-void
-Editor::midi_action (void (MidiRegionView::*method)())
-{
-	MidiRegionSelection ms = selection->midi_regions();
-
-	if (ms.empty()) {
-		return;
-	}
-
-	if (ms.size() > 1) {
-
-		vector<MidiRegionView*> views = filter_to_unique_midi_region_views (ms);
-
-		for (vector<MidiRegionView*>::iterator mrv = views.begin(); mrv != views.end(); ++mrv) {
-			((*mrv)->*method) ();
-		}
-
-	} else {
-
-		MidiRegionView* mrv = dynamic_cast<MidiRegionView*>(ms.front());
-
-		if (mrv) {
-			(mrv->*method)();
-		}
 	}
 }
 
@@ -9815,10 +9640,10 @@ Editor::remove_gaps (timecnt_t const & gap_threshold, timecnt_t const & leave_ga
 		 */
 
 		if (markers_too && (*i == first_selected_playlist)) {
-			boost::function<void (timepos_t, timecnt_t)> callback (boost::bind (&Editor::remove_gap_marker_callback, this, _1, _2));
+			std::function<void (timepos_t, timecnt_t)> callback (std::bind (&Editor::remove_gap_marker_callback, this, _1, _2));
 			(*i)->remove_gaps (gap_threshold, leave_gap, callback);
 		} else {
-			boost::function<void (timepos_t, timecnt_t)> callback (boost::bind (gap_marker_callback_relax, _1, _2));
+			std::function<void (timepos_t, timecnt_t)> callback (std::bind (gap_marker_callback_relax, _1, _2));
 			(*i)->remove_gaps (gap_threshold, leave_gap, callback);
 		}
 

@@ -348,6 +348,9 @@ Session::calc_preroll_subcycle (samplecnt_t ns) const
 {
 	std::shared_ptr<RouteList const> r = routes.reader ();
 	for (auto const& i : *r) {
+		if (!i->active ()) {
+			continue;
+		}
 		samplecnt_t route_offset = i->playback_latency ();
 		if (_remaining_latency_preroll > route_offset + ns) {
 			/* route will no-roll for complete pre-roll cycle */
@@ -911,7 +914,8 @@ Session::process_event (SessionEvent* ev)
 
 		/* except locates, which we have the capability to handle */
 
-		if (ev->type != SessionEvent::Locate) {
+		if (ev->type != SessionEvent::Locate && ev->type != SessionEvent::AutoLoop) {
+			DEBUG_TRACE (DEBUG::SessionEvents, string_compose ("Postponing and moving event to immediate queue: %1 @ %2\n", enum_2_string (ev->type), _transport_sample));
 			immediate_events.insert (immediate_events.end(), ev);
 			_remove_event (ev);
 			return;
@@ -1168,7 +1172,7 @@ Session::compute_stop_limit () const
 /* dedicated thread for signal emission.
  *
  * while sending cross-thread signals from the process thread
- * is fine in general, PBD::Signal's use of boost::function and
+ * is fine in general, PBD::Signal's use of std::function and
  * boost:bind can produce a vast overhead which is not
  * acceptable for low latency.
  *
@@ -1198,7 +1202,7 @@ Session::emit_thread_start ()
 	}
 	_rt_thread_active = true;
 
-	if (pthread_create (&_rt_emit_thread, NULL, emit_thread, this)) {
+	if (pthread_create_and_store ("SessionSignals", &_rt_emit_thread, emit_thread, this, 0)) {
 		_rt_thread_active = false;
 	}
 }
@@ -1224,9 +1228,7 @@ void *
 Session::emit_thread (void *arg)
 {
 	Session *s = static_cast<Session *>(arg);
-	pthread_set_name ("SessionSignals");
 	s->emit_thread_run ();
-	pthread_exit (0);
 	return 0;
 }
 

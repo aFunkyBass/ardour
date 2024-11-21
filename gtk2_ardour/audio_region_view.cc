@@ -28,8 +28,6 @@
 #include <algorithm>
 #include <vector>
 
-#include <boost/scoped_array.hpp>
-
 #include <gtkmm.h>
 
 #include "ardour/playlist.h"
@@ -1188,7 +1186,7 @@ AudioRegionView::set_region_fx_line (std::shared_ptr<AutomationControl> ac, std:
 	_fx_line->set_height ((uint32_t) rint (height() - NAME_HIGHLIGHT_SIZE) - 2);
 	_fx_line->reset ();
 
-	rfx->DropReferences.connect (_region_fx_connection, invalidator (*this), boost::bind (&AudioRegionView::set_region_gain_line, this), gui_context ());
+	rfx->DropReferences.connect (_region_fx_connection, invalidator (*this), std::bind (&AudioRegionView::set_region_gain_line, this), gui_context ());
 
 	bool changed = _rfx_id != rfx->id () || _rdx_param != param_id;
 	_rfx_id    = rfx->id ();
@@ -1301,13 +1299,13 @@ AudioRegionView::update_envelope_visibility ()
 	}
 
 	if (trackview.editor().current_mouse_mode() == Editing::MouseDraw || trackview.editor().current_mouse_mode() == Editing::MouseContent ) {
-		_fx_line->set_visibility (AutomationLine::VisibleAspects(AutomationLine::ControlPoints|AutomationLine::Line));
+		_fx_line->set_visibility (EditorAutomationLine::VisibleAspects(EditorAutomationLine::ControlPoints|EditorAutomationLine::Line));
 		_fx_line->canvas_group().raise_to_top ();
 	} else if (UIConfiguration::instance().get_show_region_gain() || trackview.editor().current_mouse_mode() == Editing::MouseRange ) {
-		_fx_line->set_visibility (AutomationLine::VisibleAspects(AutomationLine::Line));
+		_fx_line->set_visibility (EditorAutomationLine::VisibleAspects(EditorAutomationLine::Line));
 		_fx_line->canvas_group().raise_to_top ();
 	} else {
-		_fx_line->set_visibility (AutomationLine::VisibleAspects(0));
+		_fx_line->set_visibility (EditorAutomationLine::VisibleAspects(0));
 	}
 }
 
@@ -1371,7 +1369,7 @@ AudioRegionView::create_waves ()
 		// cerr << "\tchannel " << n << endl;
 
 		if (wait_for_data) {
-			if (audio_region()->audio_source(n)->peaks_ready (boost::bind (&AudioRegionView::peaks_ready_handler, this, n), &_data_ready_connections[n], gui_context())) {
+			if (audio_region()->audio_source(n)->peaks_ready (std::bind (&AudioRegionView::peaks_ready_handler, this, n), &_data_ready_connections[n], gui_context())) {
 				// cerr << "\tData is ready for channel " << n << "\n";
 				create_one_wave (n, true);
 			} else {
@@ -1501,7 +1499,7 @@ AudioRegionView::create_one_wave (uint32_t which, bool /*direct*/)
 void
 AudioRegionView::peaks_ready_handler (uint32_t which)
 {
-	Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), boost::bind (&AudioRegionView::create_one_wave, this, which, false));
+	Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), std::bind (&AudioRegionView::create_one_wave, this, which, false));
 	// cerr << "AudioRegionView::peaks_ready_handler() called on " << which << " this: " << this << endl;
 }
 
@@ -1813,17 +1811,6 @@ AudioRegionView::update_coverage_frame (LayerDisplay d)
 		if (fade_in_trim_handle)  { fade_in_trim_handle->raise_to_top (); }
 		if (fade_out_trim_handle) { fade_out_trim_handle->raise_to_top (); }
 	}
-}
-
-void
-AudioRegionView::show_region_editor ()
-{
-	if (editor == 0) {
-		editor = new AudioRegionEditor (trackview.session(), this);
-	}
-
-	editor->present ();
-	editor->show_all();
 }
 
 void

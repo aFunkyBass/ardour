@@ -173,7 +173,7 @@ Automatable::add_control(std::shared_ptr<Evoral::Control> ac)
 	if ((!actl || !(actl->flags() & Controllable::NotAutomatable)) && al) {
 		al->automation_state_changed.connect_same_thread (
 			_list_connections,
-			boost::bind (&Automatable::automation_list_automation_state_changed,
+			std::bind (&Automatable::automation_list_automation_state_changed,
 			             this, ac->parameter(), _1));
 	}
 
@@ -554,7 +554,7 @@ Automatable::automation_list_automation_state_changed (Evoral::Parameter const& 
 std::shared_ptr<Evoral::Control>
 Automatable::control_factory(const Evoral::Parameter& param)
 {
-	Evoral::Control*                  control   = NULL;
+	Evoral::Control*                  control   = nullptr;
 	bool                              make_list = true;
 	ParameterDescriptor               desc(param);
 	std::shared_ptr<AutomationList> list;

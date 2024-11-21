@@ -21,8 +21,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_plugin_insert_h__
-#define __ardour_plugin_insert_h__
+#pragma once
 
 #include <atomic>
 #include <memory>
@@ -265,10 +264,10 @@ public:
 		out = _configured_out;
 	}
 
-	PBD::Signal2<void,BufferSet*, BufferSet*> AnalysisDataGathered;
-	PBD::Signal0<void> PluginIoReConfigure;
-	PBD::Signal0<void> PluginMapChanged;
-	PBD::Signal0<void> PluginConfigChanged;
+	PBD::Signal<void(BufferSet*, BufferSet*)> AnalysisDataGathered;
+	PBD::Signal<void()> PluginIoReConfigure;
+	PBD::Signal<void()> PluginMapChanged;
+	PBD::Signal<void()> PluginConfigChanged;
 protected:
 	XMLNode& state () const;
 
@@ -395,4 +394,3 @@ private:
 
 } // namespace ARDOUR
 
-#endif /* __ardour_plugin_insert_h__ */

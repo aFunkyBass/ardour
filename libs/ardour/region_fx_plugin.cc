@@ -300,7 +300,11 @@ RegionFxPlugin::set_state (const XMLNode& node, int version)
 	node.get_property ("count", count);
 
 	if (_plugins.empty()) {
-		std::shared_ptr<Plugin> plugin = find_and_load_plugin (_session, node, type, unique_id, any_vst);
+		std::shared_ptr<Plugin> plugin;
+
+		if (!_session.get_disable_all_loaded_plugins ()) {
+			plugin = find_and_load_plugin (_session, node, type, unique_id, any_vst);
+		}
 
 		if (!plugin) {
 			delete _state;
@@ -424,9 +428,9 @@ RegionFxPlugin::add_plugin (std::shared_ptr<Plugin> plugin)
 
 	if (_plugins.empty ()) {
 		/* first (and probably only) plugin instance - connect to relevant signals */
-		plugin->ParameterChangedExternally.connect_same_thread (*this, boost::bind (&RegionFxPlugin::parameter_changed_externally, this, _1, _2));
-		plugin->StartTouch.connect_same_thread (*this, boost::bind (&RegionFxPlugin::start_touch, this, _1));
-		plugin->EndTouch.connect_same_thread (*this, boost::bind (&RegionFxPlugin::end_touch, this, _1));
+		plugin->ParameterChangedExternally.connect_same_thread (*this, std::bind (&RegionFxPlugin::parameter_changed_externally, this, _1, _2));
+		plugin->StartTouch.connect_same_thread (*this, std::bind (&RegionFxPlugin::start_touch, this, _1));
+		plugin->EndTouch.connect_same_thread (*this, std::bind (&RegionFxPlugin::end_touch, this, _1));
 	}
 
 	plugin->set_insert (this, _plugins.size ());
@@ -435,7 +439,7 @@ RegionFxPlugin::add_plugin (std::shared_ptr<Plugin> plugin)
 
 	if (_plugins.size () > 1) {
 		_plugins[0]->add_slave (plugin, true);
-		plugin->DropReferences.connect_same_thread (*this, boost::bind (&RegionFxPlugin::plugin_removed, this, std::weak_ptr<Plugin> (plugin)));
+		plugin->DropReferences.connect_same_thread (*this, std::bind (&RegionFxPlugin::plugin_removed, this, std::weak_ptr<Plugin> (plugin)));
 	}
 }
 
@@ -580,7 +584,7 @@ RegionFxPlugin::create_parameters ()
 		add_control (c);
 	}
 
-	plugin->PresetPortSetValue.connect_same_thread (*this, boost::bind (&RegionFxPlugin::preset_load_set_value, this, _1, _2));
+	plugin->PresetPortSetValue.connect_same_thread (*this, std::bind (&RegionFxPlugin::preset_load_set_value, this, _1, _2));
 }
 
 void

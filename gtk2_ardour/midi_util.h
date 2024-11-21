@@ -17,8 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __gtk_ardour_midi_util_h__
-#define __gtk_ardour_midi_util_h__
+#pragma once
+
+#include <cstdint>
 
 inline static void clamp_to_0_127(uint8_t &val)
 {
@@ -29,5 +30,4 @@ inline static void clamp_to_0_127(uint8_t &val)
 	}
 }
 
-#endif /* __gtk_ardour_midi_util_h__ */
 

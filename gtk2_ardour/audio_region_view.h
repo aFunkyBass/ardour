@@ -21,8 +21,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __gtk_ardour_audio_region_view_h__
-#define __gtk_ardour_audio_region_view_h__
+#pragma once
 
 #ifdef interface
 #undef interface
@@ -41,7 +40,7 @@
 #include "line_merger.h"
 #include "region_view.h"
 #include "time_axis_view_item.h"
-#include "automation_line.h"
+#include "editor_automation_line.h"
 #include "enums.h"
 
 namespace ARDOUR {
@@ -122,8 +121,6 @@ public:
 
 	void update_transient(float old_pos, float new_pos);
 	void remove_transient(float pos);
-
-	void show_region_editor ();
 
 	void     set_frame_color ();
 	uint32_t get_fill_color () const;
@@ -221,8 +218,8 @@ protected:
 
 	void transients_changed();
 
-	AutomationLine::VisibleAspects automation_line_visibility () const;
-	void _redisplay (bool) {}
+	EditorAutomationLine::VisibleAspects automation_line_visibility () const;
+	void redisplay (bool) {}
 
 private:
 	void setup_fade_handle_positions ();
@@ -253,4 +250,3 @@ private:
 	PBD::ScopedConnection _region_fx_connection;
 };
 
-#endif /* __gtk_ardour_audio_region_view_h__ */

@@ -23,8 +23,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __audio_clock_h__
-#define __audio_clock_h__
+#pragma once
 
 #include <map>
 #include <vector>
@@ -77,9 +76,10 @@ public:
 	virtual void set (Temporal::timepos_t const &, bool force = false);
 	void set_duration (Temporal::timecnt_t const &, bool force = false);
 
+	virtual	void set_mode (Mode);
+
 	void set_from_playhead ();
 	void locate ();
-	void set_mode (Mode);
 
 	void copy_text_to_clipboard () const;
 
@@ -259,4 +259,3 @@ private:
 	PBD::ScopedConnection tempo_map_connection;
 };
 
-#endif /* __audio_clock_h__ */

@@ -647,7 +647,7 @@ ARDOUR::LuaAPI::wait_for_process_callback (size_t n_cycles, int64_t timeout_ms)
 	size_t cnt = 0;
 	ScopedConnection c;
 
-	InternalSend::CycleStart.connect_same_thread (c, boost::bind (&proc_cycle_start, &cnt));
+	InternalSend::CycleStart.connect_same_thread (c, std::bind (&proc_cycle_start, &cnt));
 	while (cnt <= n_cycles) {
 		Glib::usleep (1000);
 		if (timeout_ms > 0) {
@@ -1156,6 +1156,32 @@ LuaAPI::note_list (std::shared_ptr<MidiModel> mm)
 		note_ptr_list.push_back (*i);
 	}
 	return note_ptr_list;
+}
+
+std::list<std::shared_ptr<Evoral::Event<Temporal::Beats> > >
+LuaAPI::sysex_list (std::shared_ptr<MidiModel> mm)
+{
+	typedef std::shared_ptr<Evoral::Event<Temporal::Beats> > SysExPtr;
+
+	std::list<SysExPtr> event_ptr_list;
+
+	for (auto const& i : mm->sysexes ()) {
+		event_ptr_list.push_back (i);
+	}
+	return event_ptr_list;
+}
+
+std::list<std::shared_ptr<Evoral::PatchChange<Temporal::Beats> > >
+LuaAPI::patch_change_list (std::shared_ptr<MidiModel> mm)
+{
+	typedef std::shared_ptr<Evoral::PatchChange<Temporal::Beats> > PatchChangePtr;
+
+	std::list<PatchChangePtr> patch_change_ptr_list;
+
+	for (auto const& i : mm->patch_changes ()) {
+		patch_change_ptr_list.push_back (i);
+	}
+	return patch_change_ptr_list;
 }
 
 /* ****************************************************************************/

@@ -23,8 +23,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef __ardour_gtk_gain_meter_h__
-#define __ardour_gtk_gain_meter_h__
+#pragma once
 
 #include <vector>
 #include <map>
@@ -114,7 +113,7 @@ public:
 	/** Emitted in the GUI thread when a button is pressed over the level meter;
 	 *  return true if the event is handled.
 	 */
-	PBD::Signal1<bool, GdkEventButton *> LevelMeterButtonPress;
+	PBD::Signal<bool(GdkEventButton *)> LevelMeterButtonPress;
 
 	static std::string meterpt_string (ARDOUR::MeterPoint);
 	static std::string astate_string (ARDOUR::AutoState);
@@ -264,5 +263,4 @@ class GainMeter : public GainMeterBase, public Gtk::VBox
 	std::vector<ARDOUR::DataType> _types;
 };
 
-#endif /* __ardour_gtk_gain_meter_h__ */
 

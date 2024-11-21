@@ -5,6 +5,7 @@
  * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
  * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
  * Copyright (C) 2014-2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2024 Ben Loftis <ben.loftis@harrisonaudio.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -64,7 +65,7 @@ using namespace std;
 using namespace Gtkmm2ext;
 
 RegionEditor::RegionEditor (Session* s, RegionView* rv)
-	: ArdourDialog (_("Region"))
+	: SessionHandlePtr (s)
 	, _table (9, 3)
 	, _table_row (0)
 	, _region (rv->region ())
@@ -81,8 +82,6 @@ RegionEditor::RegionEditor (Session* s, RegionView* rv)
 	, _region_fx_box (_region)
 	, _sources (1)
 {
-	set_session (s);
-
 	switch (_region->time_domain()) {
 	case Temporal::AudioTime:
 		/* XXX check length of region and choose samples or minsec */
@@ -187,21 +186,10 @@ RegionEditor::RegionEditor (Session* s, RegionView* rv)
 	_table.attach (_sources, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
-#ifndef NDEBUG // disable region FX for now
 	_table.attach (region_fx_label, 2, 3, 0, 1, Gtk::FILL, Gtk::FILL);
 	_table.attach (_region_fx_box,  2, 3, 1, _table_row + 2, Gtk::FILL, Gtk::FILL);
-#endif
 
-	get_vbox()->pack_start (_table, true, true);
-
-	add_button (Gtk::Stock::CLOSE, Gtk::RESPONSE_ACCEPT);
-
-	set_name ("RegionEditorWindow");
-	add_events (Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK);
-
-	signal_response().connect (sigc::mem_fun (*this, &RegionEditor::handle_response));
-
-	set_title (string_compose (_("Region '%1'"), _region->name()));
+	add (_table);
 
 	for (uint32_t i = 0; i < _region->sources().size(); ++i) {
 		_sources.append (_region->source(i)->name());
@@ -227,24 +215,23 @@ RegionEditor::RegionEditor (Session* s, RegionView* rv)
 
 	bounds_changed (change);
 
-	_region->PropertyChanged.connect (state_connection, invalidator (*this), boost::bind (&RegionEditor::region_changed, this, _1), gui_context());
-	_region->RegionFxChanged.connect (region_connection, invalidator (*this), boost::bind (&RegionEditor::region_fx_changed, this), gui_context ());
+	_region->PropertyChanged.connect (state_connection, invalidator (*this), std::bind (&RegionEditor::region_changed, this, _1), gui_context());
+	_region->RegionFxChanged.connect (region_connection, invalidator (*this), std::bind (&RegionEditor::region_fx_changed, this), gui_context ());
 
 	spin_arrow_grab = false;
 
-#ifndef NDEBUG // disable region FX for now
 	/* for now only audio region effects are supported */
 	if (std::dynamic_pointer_cast<AudioRegion> (_region)) {
 		region_fx_label.show ();
 		_region_fx_box.show ();
 	}
-#endif
 
 	connect_editor_events ();
 }
 
 RegionEditor::~RegionEditor ()
 {
+	remove (); /* unpack and unmap table */
 	delete _clock_group;
 }
 
@@ -324,7 +311,7 @@ RegionEditor::connect_editor_events ()
 
 	audition_button.signal_toggled().connect (sigc::mem_fun(*this, &RegionEditor::audition_button_toggled));
 
-	_session->AuditionActive.connect (audition_connection, invalidator (*this), boost::bind (&RegionEditor::audition_state_changed, this, _1), gui_context());
+	_session->AuditionActive.connect (audition_connection, invalidator (*this), std::bind (&RegionEditor::audition_state_changed, this, _1), gui_context());
 }
 
 void
@@ -504,12 +491,6 @@ RegionEditor::on_delete_event (GdkEventAny*)
 	return true;
 }
 
-void
-RegionEditor::handle_response (int)
-{
-	hide ();
-}
-
 /* ****************************************************************************/
 
 static std::list<Gtk::TargetEntry>
@@ -533,7 +514,7 @@ drag_targets ()
 
 RegionEditor::RegionFxBox::RegionFxBox (std::shared_ptr<ARDOUR::Region> r)
 	: _region (r)
-	, _display (drop_targets ())
+	, _display (drop_targets (), Gdk::ACTION_COPY | Gdk::ACTION_MOVE)
 	, _no_redisplay (false)
 	, _placement (-1)
 {
@@ -554,6 +535,7 @@ RegionEditor::RegionFxBox::RegionFxBox (std::shared_ptr<ARDOUR::Region> r)
 	_display.Reordered.connect (sigc::mem_fun (*this, &RegionFxBox::reordered));
 	_display.DropFromAnotherBox.connect (sigc::mem_fun (*this, &RegionFxBox::object_drop));
 	_display.DropFromExternal.connect (sigc::mem_fun (*this, &RegionFxBox::plugin_drop));
+	_display.DragRefuse.connect (sigc::mem_fun (*this, &RegionFxBox::drag_refuse));
 
 	_display.signal_key_press_event ().connect (sigc::mem_fun (*this, &RegionFxBox::on_key_press), false);
 
@@ -909,6 +891,13 @@ RegionEditor::RegionFxBox::delete_dragged_plugins (Region::RegionFxList const& f
 		}
 	}
 	redisplay_plugins ();
+}
+
+bool
+RegionEditor::RegionFxBox::drag_refuse (Gtkmm2ext::DnDVBox<RegionFxEntry>* source, RegionFxEntry*)
+{
+	RegionFxBox* other = reinterpret_cast<RegionFxBox*> (source->get_data ("regionfxbox"));
+	return (other && other->_region == _region);
 }
 
 void

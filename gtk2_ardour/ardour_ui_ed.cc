@@ -54,6 +54,7 @@
 #include "widgets/tearoff.h"
 #include "widgets/tooltips.h"
 
+#include "application_bar.h"
 #include "ardour_ui.h"
 #include "public_editor.h"
 #include "audio_clock.h"
@@ -1053,8 +1054,19 @@ ARDOUR_UI::on_theme_changed ()
 void
 ARDOUR_UI::focus_on_clock ()
 {
-	if (primary_clock) {
-		primary_clock->focus ();
+	// TODO: how do we handle detached windows?  Use WindowManager?
+	
+	if (editor->tabbed() && _tabs.get_current_page() == _tabs.page_num (editor->contents())) {
+		editor->focus_on_clock ();
+	}
+	if (mixer->tabbed() && _tabs.get_current_page() == _tabs.page_num (mixer->contents())) {
+		mixer->focus_on_clock ();
+	}
+	if (recorder->tabbed() && _tabs.get_current_page() == _tabs.page_num (recorder->contents())) {
+		recorder->focus_on_clock ();
+	}
+	if (trigger_page->tabbed() && _tabs.get_current_page() == _tabs.page_num (trigger_page->contents())) {
+		trigger_page->focus_on_clock ();
 	}
 }
 

@@ -243,10 +243,10 @@ Editor::add_new_location_internal (Location* location)
 		}
 	}
 
-	location->NameChanged.connect (*this, invalidator (*this), boost::bind (&Editor::location_changed, this, location), gui_context());
-	location->CueChanged.connect (*this, invalidator (*this), boost::bind (&Editor::location_changed, this, location), gui_context());
-	location->TimeDomainChanged.connect (*this, invalidator (*this), boost::bind (&Editor::location_changed, this, location), gui_context());
-	location->FlagsChanged.connect (*this, invalidator (*this), boost::bind (&Editor::location_flags_changed, this, location), gui_context());
+	location->NameChanged.connect (*this, invalidator (*this), std::bind (&Editor::location_changed, this, location), gui_context());
+	location->CueChanged.connect (*this, invalidator (*this), std::bind (&Editor::location_changed, this, location), gui_context());
+	location->TimeDomainChanged.connect (*this, invalidator (*this), std::bind (&Editor::location_changed, this, location), gui_context());
+	location->FlagsChanged.connect (*this, invalidator (*this), std::bind (&Editor::location_flags_changed, this, location), gui_context());
 
 	pair<Location*,LocationMarkers*> newpair;
 
@@ -1367,7 +1367,7 @@ Editor::marker_menu_select_all_selectables_using_range ()
 	bool is_start;
 
 	if (((l = find_location_from_marker (marker, is_start)) != 0) && (l->end() > l->start())) {
-		select_all_within (l->start(), l->end(), 0,  DBL_MAX, track_views, SelectionSet, false);
+		select_all_within (l->start(), l->end(), 0,  DBL_MAX, selectable_owners(), SelectionSet, false);
 	}
 
 }
@@ -1524,7 +1524,7 @@ Editor::marker_menu_set_from_playhead ()
 
 		timepos_t pos (_session->audible_sample());
 
-		if (default_time_domain() == Temporal::BeatTime) {
+		if (time_domain() == Temporal::BeatTime) {
 			pos = timepos_t (pos.beats());
 		}
 
