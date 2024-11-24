@@ -766,7 +766,7 @@ if test x$WITH_XJADEO != x ; then
 	DMGBACKGROUND=${DMGBACKGROUND}xj
 fi
 
-echo "Using image '$DMGBACKGROUND' for the DMG.\n"
+echo "Using image '$DMGBACKGROUND' for the DMG."
 
 ################################################################################
 ### Mixbus plugins, etc
@@ -1088,6 +1088,7 @@ fi
 
 osascript << EOF
   tell application "Finder"
+    close every window
     activate
     tell disk "${DISKNAME}"
       open
@@ -1125,6 +1126,8 @@ osascript << EOF
 EOF
 
 chmod -Rf go-w "${MNTPATH}"
+sync
+sleep 1
 sync
 
 set -e
